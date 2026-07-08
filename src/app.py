@@ -1,30 +1,38 @@
-import smtplib
-from email.message import EmailMessage
+from youtube_agent import get_trending_videos
+from idea_generator import generate_ideas
+from sender import send_email
 
-EMAIL = "munnasiraaj20@gmail.com"
-APP_PASSWORD = "bflicpzmqmmunyqy"
+def main():
+    try:
+        print("Fetching YouTube trends...")
 
-msg = EmailMessage()
-msg["Subject"] = "Test Email"
-msg["From"] = EMAIL
-msg["To"] = "munnasiraaj20@gmail.com"
-msg.set_content("Hello from Python!")
+        trends = get_trending_videos()
 
-try:
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as smtp:
-        smtp.ehlo()
-        smtp.starttls()
-        smtp.ehlo()
+        if not trends:
+            send_email(
+                subject="YouTube Trend Update",
+                body="No trending videos found."
+            )
+            return
 
-        smtp.login(EMAIL, APP_PASSWORD)
+        print("Generating ideas...")
 
-        smtp.send_message(msg)
+        report = generate_ideas(trends)
 
-    print("Email sent successfully!")
+        send_email(
+            subject="🔥 YouTube Trend Report",
+            body=report
+        )
 
-except smtplib.SMTPAuthenticationError as e:
-    print("Authentication failed.")
-    print(e)
+        print("Trend report sent successfully!")
 
-except Exception as e:
-    print("Error:", e)
+    except Exception as e:
+        print(f"ERROR: {e}")
+
+        send_email(
+            subject="YouTube Agent Error",
+            body=str(e)
+        )
+
+if __name__ == "__main__":
+    main()

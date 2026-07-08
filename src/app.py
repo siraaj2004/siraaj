@@ -1,40 +1,77 @@
-from youtube_agent import get_trending_videos
-from idea_generator import generate_ideas
-from sender import send_email
+import requests
+import feedparser
 
+from config import (
+    OPENROUTER_API_KEY,
+    RESEND_API_KEY,
+    RECIPIENT_EMAIL,
+    YOUTUBE_RSS_URL
+)
 
-def main():
-    try:
-        print("Fetching YouTube trends...")
+# Read RSS feed
+feed = feedparser.parse(YOUTUBE_RSS_URL)
 
-        trends = get_trending_videos()
+videos = []
 
-        if not trends:
-            send_email(
-                subject="YouTube Trend Update",
-                body="No trending videos were found."
-            )
-            return
+for entry in feed.entries[:10]:
+    videos.append(
+        f"Title: {entry.title}\n"
+        f"Link: {entry.link}\n"
+    )
 
-        print("Generating ideas...")
+video_text = "\n\n".join(videos)
 
-        report = generate_ideas(trends)
+prompt = f"""
+Analyze these YouTube videos.
 
-        send_email(
-            subject="🔥 YouTube Trend Report",
-            body=report
-        )
+Give:
+1. Trending topics
+2. Video ideas
+3. Shorts ideas
+4. Viral title suggestions
 
-        print("Email sent successfully.")
+Videos:
 
-    except Exception as e:
-        print(e)
+{video_text}
+"""
 
-        send_email(
-            subject="YouTube Agent Error",
-            body=str(e)
-        )
+# OpenRouter
+ai_response = requests.post(
+    "https://openrouter.ai/api/v1/chat/completions",
+    headers={
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    },
+    json={
+        "model": "openrouter/free",
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    }
+)
 
+analysis = ai_response.json()["choices"][0]["message"]["content"]
 
-if __name__ == "__main__":
-    main()
+# Resend
+email_response = requests.post(
+    "https://api.resend.com/emails",
+    headers={
+        "Authorization": f"Bearer {RESEND_API_KEY}",
+        "Content-Type": "application/json"
+    },
+    json={
+        "from": "onboarding@resend.dev",
+        "to": [RECIPIENT_EMAIL],
+        "subject": "YouTube Trends & Ideas",
+        "html": f"""
+        <h1>YouTube Trends Report</h1>
+        <pre>{analysis}</pre>
+        """
+    }
+)
+
+print("Email Status:", email_response.status_code)
+print(email_response.text)

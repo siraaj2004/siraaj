@@ -2,6 +2,7 @@ from youtube_agent import get_trending_videos
 from idea_generator import generate_ideas
 from sender import send_email
 
+
 def main():
     try:
         print("Fetching YouTube trends...")
@@ -11,7 +12,7 @@ def main():
         if not trends:
             send_email(
                 subject="YouTube Trend Update",
-                body="No trending videos found."
+                body="No trending videos were found."
             )
             return
 
@@ -24,15 +25,16 @@ def main():
             body=report
         )
 
-        print("Trend report sent successfully!")
+        print("Email sent successfully.")
 
     except Exception as e:
-        print(f"ERROR: {e}")
+        print(e)
 
         send_email(
             subject="YouTube Agent Error",
             body=str(e)
         )
+
 
 if __name__ == "__main__":
     main()

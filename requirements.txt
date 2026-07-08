@@ -1,0 +1,5 @@
+google-api-python-client
+google-generativeai
+python-dotenv
+requests
+apscheduler

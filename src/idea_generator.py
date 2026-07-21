@@ -1,54 +1,83 @@
-import google.generativeai as genai
-from config import GEMINI_API_KEY
+import os
+import requests
+from dotenv import load_dotenv
 
-# Configure Gemini API
-genai.configure(api_key=GEMINI_API_KEY)
+load_dotenv()
 
-# Load Gemini model
-model = genai.GenerativeModel("gemini-1.5-flash")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
-def generate_ideas(trending_titles):
+def generate_video_ideas(videos):
     """
-    Generate YouTube content ideas
-    based on trending videos.
+    videos: List of dictionaries returned from youtube_agent.py
     """
 
-    try:
-        prompt = f"""
-        You are a YouTube growth expert.
+    if not videos:
+        return "No videos found."
 
-        Based on these trending videos:
+    video_list = ""
 
-        {trending_titles}
+    for i, video in enumerate(videos, start=1):
+        video_list += f"""
+{i}.
+Title: {video['title']}
+Channel: {video['channel']}
+Views: {video['views']}
+Published: {video['published']}
+Video: {video['video_url']}
 
-        Generate:
-        1. Viral Shorts ideas
-        2. Long-form video ideas
-        3. Clickable titles
-        4. Trending niches
+"""
 
-        Keep response simple and clear.
-        """
+    prompt = f"""
+You are a professional YouTube strategist.
 
-        response = model.generate_content(prompt)
+Analyze the following latest YouTube videos.
 
-        return response.text
+{video_list}
 
-    except Exception as error:
-        return f"Error generating ideas: {error}"
+Tasks:
 
+1. Identify trending topics.
+2. Explain why these videos are performing well.
+3. Find common patterns.
+4. Predict upcoming trends.
+5. Suggest 15 unique viral YouTube video ideas.
+6. Suggest titles.
+7. Suggest thumbnails.
+8. Suggest target audience.
+9. Suggest upload timing.
+10. Suggest SEO keywords.
+11. Give a final summary.
 
-# Test run
-if __name__ == "__main__":
+Return the response in clean Markdown.
+"""
 
-    sample_titles = [
-        "Top AI Tools in 2026",
-        "Best YouTube Automation Ideas",
-        "How to Grow Fast on YouTube"
-    ]
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
 
-    ideas = generate_ideas(sample_titles)
+    payload = {
+        "model": "openai/gpt-4.1-mini",
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    }
 
-    print("\nGenerated Ideas:\n")
-    print(ideas)
+    response = requests.post(
+        OPENROUTER_URL,
+        headers=headers,
+        json=payload,
+        timeout=120
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    return data["choices"][0]["message"]["content"]

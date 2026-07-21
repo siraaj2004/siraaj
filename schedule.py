@@ -1,39 +1,34 @@
-from apscheduler.schedulers.blocking import BlockingScheduler
-from agents.Youtube_agent import get_trending_videos
-from agents.idea_generator import generate_ideas
-from sender import send_email  # Ensure this function name matches exactly in sender.py
+import schedule
+import time
+import subprocess
+import sys
+from pathlib import Path
 
-def job():
-    try:
-        print("Running scheduled task...")
+# Path to app.py
+APP_PATH = Path(__file__).parent / "app.py"
 
-        # Fetch and generate content
-        videos = get_trending_videos()
-        ideas = generate_ideas(videos)
 
-        # Save ideas locally
-        with open("ideas.txt", "w", encoding="utf-8") as f:
-            f.write(ideas)
+def run_app():
+    print("=" * 60)
+    print("Running YouTube Trend Agent...")
+    print("=" * 60)
 
-        # Send the email report
-        send_email(
-            subject="YouTube Trend Report",
-            body=ideas
-        )
+    subprocess.run([sys.executable, str(APP_PATH)])
 
-        print("Task completed.")
-    except Exception as e:
-        print(f"Job failed: {e}")
 
-# Initialize the scheduler
-scheduler = BlockingScheduler()
+# IST timings
+schedule.every().day.at("09:00").do(run_app)
+schedule.every().day.at("12:00").do(run_app)
+schedule.every().day.at("16:00").do(run_app)
+schedule.every().day.at("18:30").do(run_app)
 
-# Schedule the job to run every day at 9:00 AM
-scheduler.add_job(job, "cron", hour=9, minute=0, timezone="Asia/Kolkata")
+print("Scheduler started...")
+print("Scheduled Times:")
+print(" • 09:00 AM IST")
+print(" • 12:00 PM IST")
+print(" • 04:00 PM IST")
+print(" • 06:30 PM IST")
 
-# Start the scheduler (Crucial step missing from your screenshot!)
-try:
-    print("Scheduler started. Waiting for scheduled jobs...")
-    scheduler.start()
-except (KeyboardInterrupt, SystemExit):
-    print("Scheduler stopped.")
+while True:
+    schedule.run_pending()
+    time.sleep(30)

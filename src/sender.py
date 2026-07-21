@@ -1,23 +1,32 @@
-import requests
+import resend
 from config import RESEND_API_KEY, RECIPIENT_EMAIL
 
+# Configure Resend
+resend.api_key = RESEND_API_KEY
 
-def send_email(subject, html_content):
-    response = requests.post(
-        "https://api.resend.com/emails",
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "from": "onboarding@resend.dev",
+
+def send_email(subject: str, body: str):
+    """
+    Send an email using Resend.
+    """
+
+    try:
+        resend.Emails.send({
+            "from": "YouTube Trends <onboarding@resend.dev>",
             "to": [RECIPIENT_EMAIL],
             "subject": subject,
-            "html": html_content
-        }
-    )
+            "html": f"""
+            <html>
+                <body>
+                    <pre style="font-family:Arial, sans-serif; white-space:pre-wrap;">
+{body}
+                    </pre>
+                </body>
+            </html>
+            """
+        })
 
-    print("Email Status:", response.status_code)
-    print("Response:", response.text)
+        print("✅ Email sent successfully!")
 
-    return response.status_code
+    except Exception as e:
+        print(f"❌ Email sending failed: {e}")

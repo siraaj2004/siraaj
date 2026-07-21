@@ -1,7 +1,6 @@
 google-api-python-client
-google-generativeai
 python-dotenv
 requests
-apscheduler
-feedparser
-innertube
+resend
+schedule
+openai

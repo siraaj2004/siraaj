@@ -1,10 +1,14 @@
 import os
-from googleapiclient.discovery import build
 from dotenv import load_dotenv
+from googleapiclient.discovery import build
 
+# Load environment variables
 load_dotenv()
 
 API_KEY = os.getenv("YOUTUBE_API_KEY")
+
+if not API_KEY:
+    raise ValueError("YOUTUBE_API_KEY not found in .env")
 
 youtube = build(
     "youtube",
@@ -13,14 +17,9 @@ youtube = build(
 )
 
 
-def get_trending_videos(
-    region_code="IN",
-    max_results=20,
-):
+def get_trending_videos(region_code="IN", max_results=20):
     """
-    Returns the current trending YouTube videos.
-    No Channel ID.
-    No specific genre.
+    Fetch trending YouTube videos.
     """
 
     response = youtube.videos().list(
@@ -50,12 +49,20 @@ def get_trending_videos(
     return videos
 
 
-if __name__ == "__main__":
-    videos = get_trending_videos()
+def run_agent():
+    """
+    Function called by app.py
+    """
 
     print("=" * 80)
-    print("🔥 Trending YouTube Videos")
+    print("🔥 Fetching Trending YouTube Videos...")
     print("=" * 80)
+
+    videos = get_trending_videos()
+
+    if not videos:
+        print("No trending videos found.")
+        return
 
     for i, video in enumerate(videos, start=1):
         print(f"\n{i}. {video['title']}")
@@ -65,3 +72,10 @@ if __name__ == "__main__":
         print(f"Comments  : {video['comments']:,}")
         print(f"Published : {video['published_at']}")
         print(f"Video     : {video['video_url']}")
+        print("-" * 80)
+
+    return videos
+
+
+if __name__ == "__main__":
+    run_agent()

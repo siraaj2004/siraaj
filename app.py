@@ -1,56 +1,65 @@
+import os
+from dotenv import load_dotenv
+from google import genai
+
 from youtube_agent import get_trending_videos
 from idea_generator import generate_ideas
 from sender import send_email
 
+load_dotenv()
+
 
 def main():
-    try:
-        print("=" * 60)
-        print("YouTube Trend Analysis Workflow Started")
-        print("=" * 60)
+    print("=" * 60)
+    print("YouTube Trend Analysis Workflow Started")
+    print("=" * 60)
 
-        # Step 1 - Fetch Trending Videos
-        print("\n[1/3] Fetching YouTube trending videos...")
+    api_key = os.getenv("GEMINI_API_KEY")
 
-        trends = get_trending_videos(
-            region_code="IN",
-            max_results=20
-        )
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not found in .env")
 
-        if not trends:
-            print("No trending videos found.")
-            return
+    client = genai.Client(api_key=api_key)
 
-        print(f"Fetched {len(trends)} trending videos.")
+    # Step 1
+    print("\n[1/3] Fetching YouTube trending videos...")
 
-        # Step 2 - Generate Report
-        print("\n[2/3] Generating trend report...")
+    trending_data = get_trending_videos()
 
-        report = generate_ideas(trends)
+    if not trending_data:
+        raise Exception("No trending videos found.")
 
-        if not report:
-            print("Failed to generate report.")
-            return
+    print("Fetched YouTube trending videos successfully.")
 
-        print("Trend report generated successfully.")
+    # Step 2
+    print("\n[2/3] Generating trend report...")
 
-        # Step 3 - Send Email
-        print("\n[3/3] Sending email...")
+    report = generate_ideas(client, trending_data)
 
-        response = send_email(
-            subject="YouTube Trend Analysis & Video Ideas",
-            body=report
-        )
+    if not report:
+        raise Exception("Failed to generate report.")
 
-        print("\nEmail sent successfully.")
-        print(response)
+    print("Trend report generated successfully.")
 
-        print("\nWorkflow completed successfully!")
+    # Step 3
+    print("\n[3/3] Sending report via email...")
 
-    except Exception as e:
-        print("\nWorkflow failed!")
-        print(f"{type(e).__name__}: {e}")
+    response = send_email(
+        subject="📈 YouTube Trend Analysis Report",
+        body=report
+    )
+
+    print("Email sent successfully!")
+    print(response)
+
+    print("\n" + "=" * 60)
+    print("Workflow Completed Successfully")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("\nWorkflow Failed!")
+        print(e)

@@ -34,7 +34,7 @@ def main():
     # Step 2
     print("\n[2/3] Generating trend report...")
 
-    report = generate_ideas(client, trending_data)
+    report = generate_ideas(trending_data)
 
     if not report:
         raise Exception("Failed to generate report.")

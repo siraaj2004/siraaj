@@ -1,0 +1,7 @@
+APScheduler
+schedule
+requests
+python-dotenv
+google-api-python-client
+resend
+openai

@@ -1,147 +1,318 @@
-import os
-from dotenv import load_dotenv
 from google import genai
 
-load_dotenv()
 
-api_key = os.getenv("GEMINI_API_KEY")
-
-if not api_key:
-    raise ValueError("GEMINI_API_KEY not found in .env")
-
-client = genai.Client(api_key=api_key)
-
-def generate_ideas(trending_data: str) -> str:
+def generate_ideas(client: genai.Client, trending_data: str) -> str:
     prompt = f"""
-You are an expert YouTube Strategist.
+You are India's best YouTube Trend Analyst and Content Strategist.
 
-Analyze ONLY the trending data below.
+Analyze ONLY the YouTube trending data provided below.
 
-==========================
-TRENDING DATA
-==========================
+==============================
+YOUTUBE TRENDING DATA
+==============================
+
 {trending_data}
 
-IMPORTANT:
+==============================
+TASK
+==============================
+
 Return ONLY Markdown.
 
-Use proper headings, bold text, numbered lists and bullet points.
+Do NOT write introductions.
+Do NOT write conclusions.
+Do NOT mention AI.
+Do NOT create fake trends.
+Use ONLY the supplied trending data for trend-based sections.
 
-DO NOT write huge paragraphs.
+Every video idea MUST satisfy:
 
-Every section must be easy to read on mobile.
+- Static camera
+- One person only
+- No second person
+- Easy to shoot at home/terrace/room
+- Suitable for Indian audience
+- Mobile friendly
+- Titles MUST be in **bold**
 
-# YouTube Trend Analysis
+# 1. **YouTube Trend Analysis (India)**
 
-Find the TOP 10 YouTube trends.
+Find the 10 strongest trends from the supplied data.
 
-For EVERY trend use this format:
+For every trend write:
 
-## Trend 1
+## **Trend Name**
 
-**Topic:**
-One line
+**Topic**
 
 **Why it is Trending**
-- Point 1
-- Point 2
-- Point 3
+- point
+- point
+- point
 
 **Creator Opportunity**
-- Point 1
-- Point 2
-- Point 3
+- point
+- point
+- point
 
-Repeat for all 10 trends.
+---
 
-# YouTube Shorts Ideas
+# 2. **Trending Genres in India**
 
-Generate 10 Shorts ideas.
+## **YouTube Shorts Trending Genres**
 
-For every idea use EXACTLY this format.
+List every trending Shorts genre found in the supplied data.
 
-## Idea 1
+Example format
+
+- Genre
+- Genre
+- Genre
+
+### **Trending Mixed Genres**
+
+Examples
+
+- Thriller + Comedy
+- Horror + Comedy
+- Motivation + Fitness
+
+Only include combinations that appear in the supplied trends.
+
+---
+
+## **YouTube Long Form (8–10 Minutes) Trending Genres**
+
+List every trending long-form genre.
+
+Format
+
+- Genre
+- Genre
+- Genre
+
+### **Trending Mixed Genres**
+
+List mixed genres found in long-form trends.
+
+---
+
+# 3. **YouTube Shorts Ideas According to Current Trends**
+
+Generate 10 ideas.
+
+Each idea must follow current trends.
+
+Rules
+
+- Static camera
+- One actor
+- No second person
+
+For every idea
+
+## **Idea 1**
 
 **Title**
-One line
 
 **Hook**
-One sentence.
 
 **Content Flow**
+
 - Opening
 - Middle
 - Ending
 
-**Why it can go Viral**
-- Reason 1
-- Reason 2
-- Reason 3
+**Why It Can Perform Well**
 
-Repeat for all ideas.
+- point
+- point
+- point
 
-# Long Form Video Ideas (8-10 Minutes)
+---
+
+# 4. **YouTube Long Form Ideas (8–10 Minutes) According to Current Trends**
 
 Generate 10 ideas.
 
-Use this format.
+Rules
 
-## Idea 1
+- Static camera
+- One actor
+- No second person
+
+For every idea
+
+## **Idea 1**
 
 **Title**
-
-**Story**
 
 **Hook**
 
 **Main Points**
-- Point 1
-- Point 2
-- Point 3
-- Point 4
-- Point 5
+
+- Point
+- Point
+- Point
+- Point
+- Point
 
 **Ending**
 
-Repeat.
+---
 
-# Thriller + Comedy Ideas (Telugu Audience)
+# 5. **Thriller + Comedy YouTube Shorts According to Current Trends**
 
-Generate 10 unique ideas.
+Generate 10 Shorts ideas.
 
-Use this format.
+Rules
 
-## Idea 1
+- Static camera
+- One actor
+- No second person
+
+For every idea
+
+## **Idea 1**
 
 **Title**
 
-**Story**
-
 **Hook**
 
+**Story**
+
+- Beginning
+- Conflict
+- Twist
+
 **Comedy Moments**
-- Point 1
-- Point 2
-- Point 3
+
+- Point
+- Point
+- Point
 
 **Thriller Twist**
 
 **Ending**
 
-Repeat.
+---
 
-RULES
+# 6. **Thriller + Comedy Long Form Videos (8–10 Minutes) According to Current Trends**
 
-- Use Markdown.
-- All section titles must be H1.
-- All idea titles must be H2.
-- Make every label bold.
-- Use bullet points instead of paragraphs.
-- Keep every bullet under 15 words.
-- Leave one blank line between sections.
-- No giant paragraphs.
-- No sample ideas.
-- Use only the supplied trending data.
+Generate 10 ideas.
+
+Rules
+
+- Static camera
+- One actor
+- No second person
+
+For every idea
+
+## **Idea 1**
+
+**Title**
+
+**Hook**
+
+**Story**
+
+- Beginning
+- Conflict
+- Twist
+- Climax
+- Ending
+
+**Comedy Moments**
+
+- Point
+- Point
+- Point
+
+**Thriller Twist**
+
+---
+
+# 7. **Random Thriller + Comedy Shorts (NOT Based on Trends)**
+
+Generate 10 completely original ideas.
+
+Rules
+
+- Static camera
+- One actor
+- No second person
+
+For every idea
+
+## **Idea 1**
+
+**Title**
+
+**Hook**
+
+**Story**
+
+- Beginning
+- Conflict
+- Twist
+
+**Comedy Moments**
+
+- Point
+- Point
+- Point
+
+**Thriller Twist**
+
+**Ending**
+
+---
+
+# 8. **Random Thriller + Comedy Long Form Videos (8–10 Minutes) (NOT Based on Trends)**
+
+Generate 10 completely original ideas.
+
+Rules
+
+- Static camera
+- One actor
+- No second person
+
+For every idea
+
+## **Idea 1**
+
+**Title**
+
+**Hook**
+
+**Story**
+
+- Beginning
+- Conflict
+- Twist
+- Climax
+- Ending
+
+**Comedy Moments**
+
+- Point
+- Point
+- Point
+
+**Thriller Twist**
+
+==============================
+IMPORTANT
+==============================
+
+1. Return Markdown ONLY.
+2. Every title MUST be **bold**.
+3. Keep output clean and mobile friendly.
+4. Never repeat ideas.
+5. Make every title highly clickable for Indian YouTube.
+6. Prefer ideas relatable to Telugu and Indian audiences whenever possible.
 """
 
     response = client.models.generate_content(
@@ -150,13 +321,3 @@ RULES
     )
 
     return response.text
-
-if __name__ == "__main__":
-    sample_data = """
-    Trending Video 1
-    Trending Video 2
-    Trending Video 3
-    """
-
-    result = generate_ideas(sample_data)
-    print(result)

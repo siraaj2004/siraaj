@@ -1,318 +1,222 @@
+import os
+from dotenv import load_dotenv
 from google import genai
 
+load_dotenv()
 
-def generate_ideas(client: genai.Client, trending_data: str) -> str:
+api_key = os.getenv("GEMINI_API_KEY")
+
+if not api_key:
+    raise ValueError("GEMINI_API_KEY not found in .env")
+
+client = genai.Client(api_key=api_key)
+
+
+def generate_ideas(trending_data: str) -> str:
     prompt = f"""
-You are India's best YouTube Trend Analyst and Content Strategist.
+You are an expert YouTube Trend Analyst and Content Strategist.
 
 Analyze ONLY the YouTube trending data provided below.
 
-==============================
-YOUTUBE TRENDING DATA
-==============================
+========================
+TRENDING DATA
+========================
 
 {trending_data}
 
-==============================
-TASK
-==============================
-
 Return ONLY Markdown.
 
-Do NOT write introductions.
-Do NOT write conclusions.
-Do NOT mention AI.
-Do NOT create fake trends.
-Use ONLY the supplied trending data for trend-based sections.
+Use the exact format below.
 
-Every video idea MUST satisfy:
-
-- Static camera
-- One person only
-- No second person
-- Easy to shoot at home/terrace/room
-- Suitable for Indian audience
-- Mobile friendly
-- Titles MUST be in **bold**
-
-# 1. **YouTube Trend Analysis (India)**
+# **1. YouTube Trend Analysis (India)**
 
 Find the 10 strongest trends from the supplied data.
 
-For every trend write:
+For each trend use:
 
 ## **Trend Name**
 
 **Topic**
 
-**Why it is Trending**
-- point
-- point
-- point
-
-**Creator Opportunity**
-- point
-- point
-- point
+**Why It Is Trending**
+- Point
+- Point
+- Point
 
 ---
 
-# 2. **Trending Genres in India**
+# **2. YouTube Shorts Ideas (Based On Trends)**
+
+Generate 10 YouTube Shorts ideas.
+
+Rules:
+- Static camera
+- One person only
+- No second person
+- Easy to shoot at home or terrace
+- Based ONLY on supplied trends
+
+For every idea use:
+
+## **Idea Name**
+
+**Title**
+
+**Genre**
+
+**Log Line**
+
+---
+
+# **3. YouTube Long Form Ideas (8–10 Minutes)**
+
+Generate 10 ideas.
+
+Rules:
+- 8–10 minutes
+- Static camera
+- One person only
+- No second person
+- Based ONLY on supplied trends
+
+For every idea use:
+
+## **Idea Name**
+
+**Title**
+
+**Genre**
+
+**Log Line**
+
+---
+
+# **4. Trending Genres In India**
 
 ## **YouTube Shorts Trending Genres**
 
-List every trending Shorts genre found in the supplied data.
+- Genre
+- Genre
+- Genre
+- Mixed Genre
+- Mixed Genre
 
-Example format
+## **YouTube Long Form Trending Genres (8–10 Minutes)**
 
 - Genre
 - Genre
 - Genre
+- Mixed Genre
+- Mixed Genre
 
-### **Trending Mixed Genres**
+---
 
-Examples
+# **5. Thriller + Comedy YouTube Shorts Ideas (Based On Trends)**
 
+Generate 10 ideas.
+
+Rules:
+- Thriller + Comedy mix
+- Based ONLY on supplied trends
+- Static camera
+- One person only
+- No second person
+
+For every idea use:
+
+## **Idea Name**
+
+**Title**
+
+**Genre**
+
+**Log Line**
+
+---
+
+# **6. Thriller + Comedy Long Form Ideas (8–10 Minutes) (Based On Trends)**
+
+Generate 10 ideas.
+
+Rules:
+- Thriller + Comedy mix
+- Based ONLY on supplied trends
+- Static camera
+- One person only
+- No second person
+- 8–10 minutes
+
+For every idea use:
+
+## **Idea Name**
+
+**Title**
+
+**Genre**
+
+**Log Line**
+
+---
+
+# **7. Random Thriller + Comedy Shorts Ideas (Not Based On Trends)**
+
+Generate 10 completely original ideas.
+
+Rules:
+- Not based on trends
 - Thriller + Comedy
-- Horror + Comedy
-- Motivation + Fitness
-
-Only include combinations that appear in the supplied trends.
-
----
-
-## **YouTube Long Form (8–10 Minutes) Trending Genres**
-
-List every trending long-form genre.
-
-Format
-
-- Genre
-- Genre
-- Genre
-
-### **Trending Mixed Genres**
-
-List mixed genres found in long-form trends.
-
----
-
-# 3. **YouTube Shorts Ideas According to Current Trends**
-
-Generate 10 ideas.
-
-Each idea must follow current trends.
-
-Rules
-
 - Static camera
-- One actor
+- One person only
 - No second person
 
-For every idea
+For every idea use:
 
-## **Idea 1**
+## **Idea Name**
 
 **Title**
 
-**Hook**
+**Genre**
 
-**Content Flow**
-
-- Opening
-- Middle
-- Ending
-
-**Why It Can Perform Well**
-
-- point
-- point
-- point
+**Log Line**
 
 ---
 
-# 4. **YouTube Long Form Ideas (8–10 Minutes) According to Current Trends**
-
-Generate 10 ideas.
-
-Rules
-
-- Static camera
-- One actor
-- No second person
-
-For every idea
-
-## **Idea 1**
-
-**Title**
-
-**Hook**
-
-**Main Points**
-
-- Point
-- Point
-- Point
-- Point
-- Point
-
-**Ending**
-
----
-
-# 5. **Thriller + Comedy YouTube Shorts According to Current Trends**
-
-Generate 10 Shorts ideas.
-
-Rules
-
-- Static camera
-- One actor
-- No second person
-
-For every idea
-
-## **Idea 1**
-
-**Title**
-
-**Hook**
-
-**Story**
-
-- Beginning
-- Conflict
-- Twist
-
-**Comedy Moments**
-
-- Point
-- Point
-- Point
-
-**Thriller Twist**
-
-**Ending**
-
----
-
-# 6. **Thriller + Comedy Long Form Videos (8–10 Minutes) According to Current Trends**
-
-Generate 10 ideas.
-
-Rules
-
-- Static camera
-- One actor
-- No second person
-
-For every idea
-
-## **Idea 1**
-
-**Title**
-
-**Hook**
-
-**Story**
-
-- Beginning
-- Conflict
-- Twist
-- Climax
-- Ending
-
-**Comedy Moments**
-
-- Point
-- Point
-- Point
-
-**Thriller Twist**
-
----
-
-# 7. **Random Thriller + Comedy Shorts (NOT Based on Trends)**
+# **8. Random Thriller + Comedy Long Form Ideas (8–10 Minutes) (Not Based On Trends)**
 
 Generate 10 completely original ideas.
 
-Rules
-
+Rules:
+- Not based on trends
+- Thriller + Comedy
 - Static camera
-- One actor
+- One person only
 - No second person
+- 8–10 minutes
 
-For every idea
+For every idea use:
 
-## **Idea 1**
+## **Idea Name**
 
 **Title**
 
-**Hook**
+**Genre**
 
-**Story**
-
-- Beginning
-- Conflict
-- Twist
-
-**Comedy Moments**
-
-- Point
-- Point
-- Point
-
-**Thriller Twist**
-
-**Ending**
+**Log Line**
 
 ---
 
-# 8. **Random Thriller + Comedy Long Form Videos (8–10 Minutes) (NOT Based on Trends)**
+Requirements:
 
-Generate 10 completely original ideas.
-
-Rules
-
-- Static camera
-- One actor
-- No second person
-
-For every idea
-
-## **Idea 1**
-
-**Title**
-
-**Hook**
-
-**Story**
-
-- Beginning
-- Conflict
-- Twist
-- Climax
-- Ending
-
-**Comedy Moments**
-
-- Point
-- Point
-- Point
-
-**Thriller Twist**
-
-==============================
-IMPORTANT
-==============================
-
-1. Return Markdown ONLY.
-2. Every title MUST be **bold**.
-3. Keep output clean and mobile friendly.
-4. Never repeat ideas.
-5. Make every title highly clickable for Indian YouTube.
-6. Prefer ideas relatable to Telugu and Indian audiences whenever possible.
+- Return Markdown only.
+- Do not write any introduction.
+- Do not write any conclusion.
+- Do not use placeholders.
+- Every heading must be in bold.
+- Every Title must be in bold.
+- Keep responses mobile friendly.
+- Use ONLY supplied trend data for trend-based sections.
+- Random ideas must NOT depend on the trend data.
+- The Log Line must be 2–3 sentences that clearly explain the entire video idea without giving a full script.
 """
 
     response = client.models.generate_content(

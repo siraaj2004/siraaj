@@ -4,219 +4,123 @@ from google import genai
 
 load_dotenv()
 
-api_key = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-if not api_key:
+if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY not found in .env")
 
-client = genai.Client(api_key=api_key)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-def generate_ideas(trending_data: str) -> str:
+def generate_ideas(india_trends, world_trends):
     prompt = f"""
-You are an expert YouTube Trend Analyst and Content Strategist.
-
-Analyze ONLY the YouTube trending data provided below.
-
-========================
-TRENDING DATA
-========================
-
-{trending_data}
-
-Return ONLY Markdown.
-
-Use the exact format below.
-
-# **1. YouTube Trend Analysis (India)**
-
-Find the 10 strongest trends from the supplied data.
-
-For each trend use:
-
-## **Trend Name**
-
-**Topic**
-
-**Why It Is Trending**
-- Point
-- Point
-- Point
-
----
-
-# **2. YouTube Shorts Ideas (Based On Trends)**
-
-Generate 10 YouTube Shorts ideas.
+Generate a professional YouTube Trend Analysis report.
 
 Rules:
-- Static camera
-- One person only
-- No second person
-- Easy to shoot at home or terrace
-- Based ONLY on supplied trends
 
-For every idea use:
+Do not use Markdown.
+Do not use #, ##, ###.
+Do not use ** or *.
+Do not use bullet symbols.
+Use proper headings.
+Leave one blank line between sections.
+Number every trend.
+Write clean professional English.
+Make the output suitable for exporting directly to a PDF.
 
-## **Idea Name**
+Report Structure
 
-**Title**
+YouTube Trend Analysis
 
-**Genre**
+Date
 
-**Log Line**
+India Trends
 
----
+Trend 1
 
-# **3. YouTube Long Form Ideas (8–10 Minutes)**
+Topic
 
-Generate 10 ideas.
+Why Trending
 
-Rules:
-- 8–10 minutes
-- Static camera
-- One person only
-- No second person
-- Based ONLY on supplied trends
+Estimated Views
 
-For every idea use:
+Target Audience
 
-## **Idea Name**
+Content Ideas
 
-**Title**
+Trend 2
 
-**Genre**
+Topic
 
-**Log Line**
+Why Trending
 
----
+Estimated Views
 
-# **4. Trending Genres In India**
+Target Audience
 
-## **YouTube Shorts Trending Genres**
+Content Ideas
 
-- Genre
-- Genre
-- Genre
-- Mixed Genre
-- Mixed Genre
+Trend 3
 
-## **YouTube Long Form Trending Genres (8–10 Minutes)**
+Topic
 
-- Genre
-- Genre
-- Genre
-- Mixed Genre
-- Mixed Genre
+Why Trending
 
----
+Estimated Views
 
-# **5. Thriller + Comedy YouTube Shorts Ideas (Based On Trends)**
+Target Audience
 
-Generate 10 ideas.
+Content Ideas
 
-Rules:
-- Thriller + Comedy mix
-- Based ONLY on supplied trends
-- Static camera
-- One person only
-- No second person
+World Trends
 
-For every idea use:
+Trend 1
 
-## **Idea Name**
+Topic
 
-**Title**
+Why Trending
 
-**Genre**
+Estimated Views
 
-**Log Line**
+Target Audience
 
----
+Content Ideas
 
-# **6. Thriller + Comedy Long Form Ideas (8–10 Minutes) (Based On Trends)**
+Trend 2
 
-Generate 10 ideas.
+Topic
 
-Rules:
-- Thriller + Comedy mix
-- Based ONLY on supplied trends
-- Static camera
-- One person only
-- No second person
-- 8–10 minutes
+Why Trending
 
-For every idea use:
+Estimated Views
 
-## **Idea Name**
+Target Audience
 
-**Title**
+Content Ideas
 
-**Genre**
+Trend 3
 
-**Log Line**
+Topic
 
----
+Why Trending
 
-# **7. Random Thriller + Comedy Shorts Ideas (Not Based On Trends)**
+Estimated Views
 
-Generate 10 completely original ideas.
+Target Audience
 
-Rules:
-- Not based on trends
-- Thriller + Comedy
-- Static camera
-- One person only
-- No second person
+Content Ideas
 
-For every idea use:
+Top 20 YouTube Video Ideas
 
-## **Idea Name**
+Number every idea from 1 to 20.
 
-**Title**
+India Trend Data
 
-**Genre**
+{india_trends}
 
-**Log Line**
+World Trend Data
 
----
-
-# **8. Random Thriller + Comedy Long Form Ideas (8–10 Minutes) (Not Based On Trends)**
-
-Generate 10 completely original ideas.
-
-Rules:
-- Not based on trends
-- Thriller + Comedy
-- Static camera
-- One person only
-- No second person
-- 8–10 minutes
-
-For every idea use:
-
-## **Idea Name**
-
-**Title**
-
-**Genre**
-
-**Log Line**
-
----
-
-Requirements:
-
-- Return Markdown only.
-- Do not write any introduction.
-- Do not write any conclusion.
-- Do not use placeholders.
-- Every heading must be in bold.
-- Every Title must be in bold.
-- Keep responses mobile friendly.
-- Use ONLY supplied trend data for trend-based sections.
-- Random ideas must NOT depend on the trend data.
-- The Log Line must be 2–3 sentences that clearly explain the entire video idea without giving a full script.
+{world_trends}
 """
 
     response = client.models.generate_content(

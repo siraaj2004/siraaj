@@ -40,14 +40,19 @@ jobs:
           TO_EMAIL=${{ secrets.TO_EMAIL }}
           EOF
 
-      - name: Debug Repository
+      - name: Check Repository
         run: |
           echo "Current directory:"
           pwd
-          echo "Repository files:"
+
+          echo "Files:"
           ls -la
-          echo "All files:"
-          find .
+
+          echo "Python files:"
+          find . -maxdepth 2 -type f -name "*.py"
+
+          echo "Checking app.py:"
+          test -f app.py && echo "app.py FOUND" || echo "app.py NOT FOUND"
 
       - name: Run Application
         run: python app.py

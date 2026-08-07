@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
 
   schedule:
-    - cron: "0 3 * * *"    # 08:30 AM IST
-    - cron: "30 6 * * *"   # 12:00 PM IST
-    - cron: "30 10 * * *"  # 04:00 PM IST
-    - cron: "0 16 * * *"   # 09:30 PM IST
+    - cron: "0 3 * * *"
+    - cron: "30 6 * * *"
+    - cron: "30 10 * * *"
+    - cron: "0 16 * * *"
 
 permissions:
   contents: read
@@ -15,7 +15,6 @@ permissions:
 jobs:
   trend-analysis:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
       - name: Checkout Repository
@@ -25,7 +24,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
 
       - name: Install Dependencies
         run: |
@@ -42,14 +40,23 @@ jobs:
           TO_EMAIL=${{ secrets.TO_EMAIL }}
           EOF
 
-      - name: Run Trend Analysis
+      - name: Debug Repository
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Repository files:"
+          ls -la
+          echo "All files:"
+          find .
+
+      - name: Run Application
         run: python app.py
 
       - name: Upload PDF
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-trends-report
+          name: youtube-trend-report
           path: |
             *.pdf
             **/*.pdf

@@ -57,7 +57,7 @@ jobs:
         run: |
           echo "YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}" >> .env
           echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
-          echo "TO_EMAIL=${{ secrets.TO_EMAIL }}" >> .env
+          echo "RECIPIENT_EMAIL=${{ secrets.TO_EMAIL }}" >> .env
           echo "FROM_EMAIL=${{ secrets.FROM_EMAIL }}" >> .env
           echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> .env
 
@@ -70,7 +70,7 @@ jobs:
 
           elif [ -f "app.py" ]; then
             echo "Found app.py"
-            python app.py
+           src/app.py
 
           else
             echo "ERROR: app.py was not found!"

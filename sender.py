@@ -1,14 +1,17 @@
 import requests
+
 from config import (
     RESEND_API_KEY,
     FROM_EMAIL,
     RECIPIENT_EMAIL
 )
 
+
 RESEND_URL = "https://api.resend.com/emails"
 
 
 def send_email(subject, message):
+
     headers = {
         "Authorization": f"Bearer {RESEND_API_KEY}",
         "Content-Type": "application/json"
@@ -31,10 +34,13 @@ def send_email(subject, message):
     if response.status_code in (200, 201):
         print("✅ Email sent successfully")
         print(response.json())
-    else:
-        print("❌ Failed to send email")
-        print(response.status_code)
-        print(response.text)
+        return True
+
+    print("❌ Failed to send email")
+    print("Status:", response.status_code)
+    print("Response:", response.text)
+
+    return False
 
 
 if __name__ == "__main__":

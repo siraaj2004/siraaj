@@ -1,0 +1,57 @@
+name: YouTube Trend Analysis
+
+on:
+  schedule:
+    # 08:30 AM IST
+    - cron: "0 3 * * *"
+
+    # 12:00 PM IST
+    - cron: "30 6 * * *"
+
+    # 04:00 PM IST
+    - cron: "30 10 * * *"
+
+    # 09:30 PM IST
+    - cron: "0 16 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trend-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create .env File
+        run: |
+          echo "YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}" >> .env
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> .env
+          echo "FROM_EMAIL=${{ secrets.FROM_EMAIL }}" >> .env
+          echo "TO_EMAIL=${{ secrets.TO_EMAIL }}" >> .env
+
+      - name: Run YouTube Trend Analysis
+        run: python app.py
+
+      - name: Upload Generated PDF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-trends-report
+          path: Youtube_Trends_Report.pdf
+          if-no-files-found: ignore

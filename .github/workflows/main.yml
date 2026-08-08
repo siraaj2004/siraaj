@@ -68,9 +68,9 @@ jobs:
             echo "Found src/app.py"
             python src/app.py
 
-          elif [ -f "app.py" ]; then
-            echo "Found app.py"
-           src/app.py
+         elif [ -f "app.py" ]; then
+           echo "Found app.py"
+               python app.py
 
           else
             echo "ERROR: app.py was not found!"

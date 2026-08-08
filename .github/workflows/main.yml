@@ -45,7 +45,7 @@ jobs:
         run: |
           echo "YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}" >> .env
           echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
-          echo "RECIPIENT_EMAIL=${{ secrets.TO_EMAIL }}" >> .env
+          echo "RECIPIENT_EMAIL=${{ secrets.RECIPIENT_EMAIL }}" >> .env
           echo "FROM_EMAIL=${{ secrets.FROM_EMAIL }}" >> .env
           echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> .env
 

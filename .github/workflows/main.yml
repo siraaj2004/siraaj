@@ -1,57 +1,92 @@
 name: YouTube Trend Analysis
 
 on:
+  workflow_dispatch:
+
   schedule:
-    # 08:30 AM IST
+    # 8:30 AM IST
     - cron: "0 3 * * *"
 
     # 12:00 PM IST
     - cron: "30 6 * * *"
 
-    # 04:00 PM IST
+    # 4:00 PM IST
     - cron: "30 10 * * *"
 
-    # 09:30 PM IST
+    # 9:30 PM IST
     - cron: "0 16 * * *"
-
-  workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   trend-analysis:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # 2. Setup Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      # 3. Show files - useful for debugging
+      - name: Check Repository Files
+        run: |
+          echo "Current directory:"
+          pwd
+
+          echo ""
+          echo "Repository files:"
+          find . -maxdepth 3 -type f | sort
+
+      # 4. Install dependencies
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
 
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt found."
+          fi
+
+      # 5. Create .env
       - name: Create .env File
         run: |
           echo "YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}" >> .env
           echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
-          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> .env
-          echo "FROM_EMAIL=${{ secrets.FROM_EMAIL }}" >> .env
           echo "TO_EMAIL=${{ secrets.TO_EMAIL }}" >> .env
+          echo "FROM_EMAIL=${{ secrets.FROM_EMAIL }}" >> .env
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> .env
 
+      # 6. Run application
       - name: Run YouTube Trend Analysis
-        run: python app.py
+        run: |
+          if [ -f "src/app.py" ]; then
+            echo "Found src/app.py"
+            python src/app.py
 
+          elif [ -f "app.py" ]; then
+            echo "Found app.py"
+            python app.py
+
+          else
+            echo "ERROR: app.py was not found!"
+            echo "Available Python files:"
+            find . -type f -name "*.py" | sort
+            exit 1
+          fi
+
+      # 7. Upload generated PDF if it exists
       - name: Upload Generated PDF
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-trends-report
-          path: Youtube_Trends_Report.pdf
+          name: trend-analysis-report
+          path: |
+            *.pdf
+            output/*.pdf
+            reports/*.pdf
           if-no-files-found: ignore

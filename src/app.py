@@ -1,69 +1,146 @@
-```python
 import os
+import sys
+from pathlib import Path
+
+# ============================================================
+# PROJECT PATH
+# ============================================================
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Add project root to Python path
+# This allows importing:
+# youtube_agent.py
+# idea_generator.py
+# sender.py
+# config.py
+sys.path.insert(0, str(BASE_DIR))
+
+
+# ============================================================
+# LOAD ENVIRONMENT VARIABLES
+# ============================================================
+
 from dotenv import load_dotenv
+
+load_dotenv(BASE_DIR / ".env")
+
+
+# ============================================================
+# CHECK API KEYS
+# ============================================================
+
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+
+if not YOUTUBE_API_KEY:
+    raise ValueError(
+        "YOUTUBE_API_KEY is missing.\n"
+        "Add YOUTUBE_API_KEY to your .env file."
+    )
+
+if not GEMINI_API_KEY:
+    raise ValueError(
+        "GEMINI_API_KEY is missing.\n"
+        "Add GEMINI_API_KEY to your .env file."
+    )
+
+
+# ============================================================
+# IMPORT PROJECT MODULES
+# ============================================================
 
 from youtube_agent import get_trending_videos
 from idea_generator import generate_ideas
 from sender import send_email
 
 
-# Load environment variables
-load_dotenv()
-
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
+
     print("=" * 60)
-    print("YouTube Trend Analysis Workflow Started")
+    print("YOUTUBE TREND ANALYSIS")
     print("=" * 60)
 
-    # Check Gemini API key
-    api_key = os.getenv("GEMINI_API_KEY")
+    # --------------------------------------------------------
+    # STEP 1
+    # --------------------------------------------------------
 
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY not found in environment variables")
-
-    # Step 1: Fetch YouTube trending videos
     print("\n[1/3] Fetching YouTube trending videos...")
 
     trending_data = get_trending_videos()
 
     if not trending_data:
-        raise Exception("No trending videos found.")
+        raise RuntimeError(
+            "YouTube returned no trending videos."
+        )
 
-    print("Fetched YouTube trending videos successfully.")
+    print(
+        f"Successfully fetched {len(trending_data)} videos."
+    )
 
-    # Step 2: Generate trend report
+
+    # --------------------------------------------------------
+    # STEP 2
+    # --------------------------------------------------------
+
     print("\n[2/3] Generating trend report...")
 
     report = generate_ideas(trending_data)
 
     if not report:
-        raise Exception("Failed to generate report.")
+        raise RuntimeError(
+            "AI failed to generate the trend report."
+        )
 
     print("Trend report generated successfully.")
 
-    # Step 3: Send report via email
-    print("\n[3/3] Sending report via email...")
+
+    # --------------------------------------------------------
+    # STEP 3
+    # --------------------------------------------------------
+
+    print("\n[3/3] Sending email...")
 
     response = send_email(
         subject="📈 YouTube Trend Analysis Report",
         body=report
     )
 
-    print("Email sent successfully!")
-    print(response)
+    print("Email sent successfully.")
+
+    if response:
+        print(response)
+
+
+    # --------------------------------------------------------
+    # COMPLETE
+    # --------------------------------------------------------
 
     print("\n" + "=" * 60)
-    print("Workflow Completed Successfully")
+    print("WORKFLOW COMPLETED SUCCESSFULLY")
     print("=" * 60)
 
 
+# ============================================================
+# RUN
+# ============================================================
+
 if __name__ == "__main__":
+
     try:
         main()
 
-    except Exception as e:
-        print("\nWorkflow Failed!")
-        print(f"Error: {e}")
+    except Exception as error:
+
+        print("\n" + "=" * 60)
+        print("WORKFLOW FAILED")
+        print("=" * 60)
+
+        print(f"\nError: {error}")
+
         raise
-```

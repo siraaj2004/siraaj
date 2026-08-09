@@ -67,47 +67,43 @@ def main():
     print("=" * 60)
 
     # --------------------------------------------------------
-    # STEP 1: Fetch India Trends
+    # STEP 1: Fetch India Trending Videos
     # --------------------------------------------------------
 
     print("\n[1/3] Fetching YouTube trending videos...")
 
-    india_trends = get_trending_videos(region_code="IN", max_results=20)
+    # Fetch India trends
+    india_trending_data = get_trending_videos(region_code="IN", max_results=20)
 
-    if not india_trends:
+    if not india_trending_data:
         raise RuntimeError(
             "YouTube returned no trending videos for India."
         )
 
     print(
-        f"Successfully fetched {len(india_trends)} India trending videos."
+        f"Successfully fetched {len(india_trending_data)} India trending videos."
     )
 
-    # --------------------------------------------------------
-    # STEP 1B: Fetch World Trends
-    # --------------------------------------------------------
+    # Fetch World trends
+    world_trending_data = get_trending_videos(region_code="US", max_results=20)
 
-    print("\nFetching world YouTube trending videos...")
-
-    world_trends = get_trending_videos(region_code="US", max_results=20)
-
-    if not world_trends:
+    if not world_trending_data:
         raise RuntimeError(
-            "YouTube returned no trending videos for world."
+            "YouTube returned no trending videos for World."
         )
 
     print(
-        f"Successfully fetched {len(world_trends)} world trending videos."
+        f"Successfully fetched {len(world_trending_data)} World trending videos."
     )
 
 
     # --------------------------------------------------------
-    # STEP 2
+    # STEP 2: Generate Trend Report
     # --------------------------------------------------------
 
     print("\n[2/3] Generating trend report...")
 
-    report = generate_ideas(india_trends, world_trends)
+    report = generate_ideas(india_trending_data, world_trending_data)
 
     if not report:
         raise RuntimeError(
@@ -118,7 +114,7 @@ def main():
 
 
     # --------------------------------------------------------
-    # STEP 3
+    # STEP 3: Send Email
     # --------------------------------------------------------
 
     print("\n[3/3] Sending email...")

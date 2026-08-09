@@ -67,20 +67,37 @@ def main():
     print("=" * 60)
 
     # --------------------------------------------------------
-    # STEP 1
+    # STEP 1: Fetch India Trends
     # --------------------------------------------------------
 
     print("\n[1/3] Fetching YouTube trending videos...")
 
-    trending_data = get_trending_videos()
+    india_trends = get_trending_videos(region_code="IN", max_results=20)
 
-    if not trending_data:
+    if not india_trends:
         raise RuntimeError(
-            "YouTube returned no trending videos."
+            "YouTube returned no trending videos for India."
         )
 
     print(
-        f"Successfully fetched {len(trending_data)} videos."
+        f"Successfully fetched {len(india_trends)} India trending videos."
+    )
+
+    # --------------------------------------------------------
+    # STEP 1B: Fetch World Trends
+    # --------------------------------------------------------
+
+    print("\nFetching world YouTube trending videos...")
+
+    world_trends = get_trending_videos(region_code="US", max_results=20)
+
+    if not world_trends:
+        raise RuntimeError(
+            "YouTube returned no trending videos for world."
+        )
+
+    print(
+        f"Successfully fetched {len(world_trends)} world trending videos."
     )
 
 
@@ -90,7 +107,7 @@ def main():
 
     print("\n[2/3] Generating trend report...")
 
-    report = generate_ideas(trending_data)
+    report = generate_ideas(india_trends, world_trends)
 
     if not report:
         raise RuntimeError(

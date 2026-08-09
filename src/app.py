@@ -121,7 +121,7 @@ def main():
 
     response = send_email(
         subject="📈 YouTube Trend Analysis Report",
-        body=report
+        message=report
     )
 
     print("Email sent successfully.")

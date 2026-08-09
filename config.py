@@ -3,21 +3,28 @@ import os
 
 load_dotenv()
 
-SMTP_EMAIL = os.getenv("SMTP_EMAIL")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
-RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
+FROM_EMAIL = os.getenv("FROM_EMAIL")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 
 missing = []
 
-if not SMTP_EMAIL:
-    missing.append("SMTP_EMAIL")
+if not YOUTUBE_API_KEY:
+    missing.append("YOUTUBE_API_KEY")
 
-if not SMTP_PASSWORD:
-    missing.append("SMTP_PASSWORD")
+if not GEMINI_API_KEY:
+    missing.append("GEMINI_API_KEY")
 
 if not RECIPIENT_EMAIL:
     missing.append("RECIPIENT_EMAIL")
+
+if not FROM_EMAIL:
+    missing.append("FROM_EMAIL")
+
+if not RESEND_API_KEY:
+    missing.append("RESEND_API_KEY")
 
 if missing:
     raise Exception(

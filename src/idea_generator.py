@@ -74,12 +74,168 @@ client = genai.Client(
 
 
 # ============================================================
+# YOUTUBE CLIENT
+# ============================================================
+
+youtube = build(
+    "youtube",
+    "v3",
+    developerKey=YOUTUBE_API_KEY
+)
+
+
+# ============================================================
 # DATE
 # ============================================================
 
 REPORT_DATE = datetime.now().strftime(
     "%B %d, %Y"
 )
+
+
+# ============================================================
+# YOUTUBE TREND COLLECTION
+# ============================================================
+
+def get_youtube_trends(
+    region_code,
+    max_results=50
+):
+    try:
+
+        response = youtube.videos().list(
+            part="snippet,statistics,contentDetails",
+            chart="mostPopular",
+            regionCode=region_code,
+            maxResults=max_results
+        ).execute()
+
+        trends = []
+
+        for video in response.get("items", []):
+
+            snippet = video.get(
+                "snippet",
+                {}
+            )
+
+            statistics = video.get(
+                "statistics",
+                {}
+            )
+
+            content_details = video.get(
+                "contentDetails",
+                {}
+            )
+
+            trends.append({
+                "title": snippet.get(
+                    "title",
+                    ""
+                ),
+
+                "channel": snippet.get(
+                    "channelTitle",
+                    ""
+                ),
+
+                "description": snippet.get(
+                    "description",
+                    ""
+                )[:1000],
+
+                "published_at": snippet.get(
+                    "publishedAt",
+                    ""
+                ),
+
+                "views": statistics.get(
+                    "viewCount",
+                    "0"
+                ),
+
+                "likes": statistics.get(
+                    "likeCount",
+                    "0"
+                ),
+
+                "comments": statistics.get(
+                    "commentCount",
+                    "0"
+                ),
+
+                "duration": content_details.get(
+                    "duration",
+                    ""
+                ),
+
+                "category_id": snippet.get(
+                    "categoryId",
+                    ""
+                ),
+
+                "video_id": video.get(
+                    "id",
+                    ""
+                ),
+
+                "region": region_code
+            })
+
+        return trends
+
+    except Exception as e:
+
+        print(
+            f"YouTube error [{region_code}]: {e}"
+        )
+
+        return []
+
+
+# ============================================================
+# INDIA
+# ============================================================
+
+def get_india_trends():
+
+    return get_youtube_trends(
+        "IN",
+        50
+    )
+
+
+# ============================================================
+# WORLD
+# ============================================================
+
+def get_world_trends():
+
+    regions = [
+        "US",
+        "GB",
+        "CA",
+        "AU",
+        "JP"
+    ]
+
+    all_trends = []
+
+    for region in regions:
+
+        print(
+            f"Collecting trends from {region}..."
+        )
+
+        trends = get_youtube_trends(
+            region,
+            20
+        )
+
+        all_trends.extend(trends)
+
+    return all_trends
 
 
 # ============================================================
@@ -101,10 +257,14 @@ TREND {index}
 
 Title: {trend.get("title", "")}
 Channel: {trend.get("channel", "")}
+Description: {trend.get("description", "")}
 Published: {trend.get("published_at", "")}
 Views: {trend.get("views", "0")}
 Likes: {trend.get("likes", "0")}
 Comments: {trend.get("comments", "0")}
+Duration: {trend.get("duration", "")}
+Category ID: {trend.get("category_id", "")}
+Region: {trend.get("region", "")}
 """
         )
 
@@ -1128,3 +1288,170 @@ def save_raw_report(
     print(
         f"Raw report saved: {filename}"
     )
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+
+    print()
+    print(
+        "=========================================="
+    )
+    print(
+        "YOUTUBE TREND INTELLIGENCE"
+    )
+    print(
+        "=========================================="
+    )
+
+    # --------------------------------------------------------
+    # INDIA
+    # --------------------------------------------------------
+
+    print()
+    print(
+        "1. Collecting India YouTube trends..."
+    )
+
+    india_trends = get_india_trends()
+
+    print(
+        f"India trends collected: "
+        f"{len(india_trends)}"
+    )
+
+    # --------------------------------------------------------
+    # WORLD
+    # --------------------------------------------------------
+
+    print()
+    print(
+        "2. Collecting global YouTube trends..."
+    )
+
+    world_trends = get_world_trends()
+
+    print(
+        f"World trends collected: "
+        f"{len(world_trends)}"
+    )
+
+    if not india_trends:
+
+        raise RuntimeError(
+            "No India YouTube trend data found."
+        )
+
+    if not world_trends:
+
+        raise RuntimeError(
+            "No World YouTube trend data found."
+        )
+
+    # --------------------------------------------------------
+    # GEMINI
+    # --------------------------------------------------------
+
+    print()
+    print(
+        "3. Generating report with Gemini..."
+    )
+
+    report = generate_report(
+        india_trends,
+        world_trends
+    )
+
+    report = clean_report(
+        report
+    )
+
+    if not report:
+
+        raise RuntimeError(
+            "Generated report is empty."
+        )
+
+    # --------------------------------------------------------
+    # RAW TEXT
+    # --------------------------------------------------------
+
+    print()
+    print(
+        "4. Saving raw report..."
+    )
+
+    save_raw_report(
+        report
+    )
+
+    # --------------------------------------------------------
+    # PDF
+    # --------------------------------------------------------
+
+    pdf_filename = (
+        "YouTube_Trend_Intelligence_"
+        + datetime.now().strftime(
+            "%Y%m%d_%H%M%S"
+        )
+        + ".pdf"
+    )
+
+    print()
+    print(
+        "5. Creating professional PDF..."
+    )
+
+    create_pdf(
+        report,
+        pdf_filename
+    )
+
+    print(
+        f"PDF created: {pdf_filename}"
+    )
+
+    # --------------------------------------------------------
+    # EMAIL
+    # --------------------------------------------------------
+
+    print()
+    print(
+        "6. Sending PDF through Resend..."
+    )
+
+    send_pdf_email(
+        pdf_filename
+    )
+
+    # --------------------------------------------------------
+    # COMPLETE
+    # --------------------------------------------------------
+
+    print()
+    print(
+        "=========================================="
+    )
+
+    print(
+        "COMPLETED SUCCESSFULLY"
+    )
+
+    print(
+        f"PDF: {pdf_filename}"
+    )
+
+    print(
+        "=========================================="
+    )
+
+
+# ============================================================
+# RUN
+# ============================================================
+
+if __name__ == "__main__":
+    main()

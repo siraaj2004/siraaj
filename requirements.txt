@@ -7,3 +7,4 @@ resend
 openai
 pandas
 google-genai
+reportlab

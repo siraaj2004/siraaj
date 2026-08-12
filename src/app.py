@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from datetime import datetime
 
 # ============================================================
 # PROJECT PATH
@@ -8,152 +9,198 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Add project root to Python path
-# This allows importing:
-# youtube_agent.py
-# idea_generator.py
-# sender.py
-# config.py
+# Allow app.py to import idea_generator.py from project root
 sys.path.insert(0, str(BASE_DIR))
 
-
 # ============================================================
-# LOAD ENVIRONMENT VARIABLES
-# ============================================================
-
-from dotenv import load_dotenv
-
-load_dotenv(BASE_DIR / ".env")
-
-
-# ============================================================
-# CHECK API KEYS
+# IMPORT IDEA GENERATOR
 # ============================================================
 
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-
-if not YOUTUBE_API_KEY:
-    raise ValueError(
-        "YOUTUBE_API_KEY is missing.\n"
-        "Add YOUTUBE_API_KEY to your .env file."
-    )
-
-if not GEMINI_API_KEY:
-    raise ValueError(
-        "GEMINI_API_KEY is missing.\n"
-        "Add GEMINI_API_KEY to your .env file."
-    )
+from idea_generator import (
+    get_india_trends,
+    get_world_trends,
+    generate_report,
+    clean_report,
+    create_pdf,
+    save_raw_report,
+    send_pdf_email,
+)
 
 
 # ============================================================
-# IMPORT PROJECT MODULES
+# OUTPUT DIRECTORY
 # ============================================================
 
-from youtube_agent import get_trending_videos
-from idea_generator import generate_report
-from sender import send_email
+OUTPUT_DIR = BASE_DIR / "output"
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 
 # ============================================================
-# MAIN
+# MAIN TRIGGER
 # ============================================================
 
 def main():
 
+    print()
     print("=" * 60)
-    print("YOUTUBE TREND ANALYSIS")
+    print("       YOUTUBE TREND INTELLIGENCE AGENT")
     print("=" * 60)
-
-    # --------------------------------------------------------
-    # STEP 1: Fetch India Trending Videos
-    # --------------------------------------------------------
-
-    print("\n[1/3] Fetching YouTube trending videos...")
-
-    # Fetch India trends
-    india_trending_data = get_trending_videos(region_code="IN", max_results=20)
-
-    if not india_trending_data:
-        raise RuntimeError(
-            "YouTube returned no trending videos for India."
-        )
-
-    print(
-        f"Successfully fetched {len(india_trending_data)} India trending videos."
-    )
-
-    # Fetch World trends
-    world_trending_data = get_trending_videos(region_code="US", max_results=20)
-
-    if not world_trending_data:
-        raise RuntimeError(
-            "YouTube returned no trending videos for World."
-        )
-
-    print(
-        f"Successfully fetched {len(world_trending_data)} World trending videos."
-    )
-
-
-    # --------------------------------------------------------
-    # STEP 2: Generate Trend Report
-    # --------------------------------------------------------
-
-    print("\n[2/3] Generating trend report...")
-
-    report = generate_report(india_trending_data, world_trending_data)
-
-    if not report:
-        raise RuntimeError(
-            "AI failed to generate the trend report."
-        )
-
-    print("Trend report generated successfully.")
-
-
-    # --------------------------------------------------------
-    # STEP 3: Send Email
-    # --------------------------------------------------------
-
-    print("\n[3/3] Sending email...")
-
-    response = send_email(
-        subject="📈 YouTube Trend Analysis Report",
-        message=report
-    )
-
-    print("Email sent successfully.")
-
-    if response:
-        print(response)
-
-
-    # --------------------------------------------------------
-    # COMPLETE
-    # --------------------------------------------------------
-
-    print("\n" + "=" * 60)
-    print("WORKFLOW COMPLETED SUCCESSFULLY")
-    print("=" * 60)
-
-
-# ============================================================
-# RUN
-# ============================================================
-
-if __name__ == "__main__":
 
     try:
-        main()
+
+        # ----------------------------------------------------
+        # STEP 1 — INDIA TRENDS
+        # ----------------------------------------------------
+
+        print()
+        print("[1/6] Collecting India YouTube trends...")
+
+        india_trends = get_india_trends()
+
+        print(
+            f"India trends collected: "
+            f"{len(india_trends)}"
+        )
+
+        if not india_trends:
+            raise RuntimeError(
+                "No India YouTube trend data found."
+            )
+
+        # ----------------------------------------------------
+        # STEP 2 — WORLD TRENDS
+        # ----------------------------------------------------
+
+        print()
+        print("[2/6] Collecting global YouTube trends...")
+
+        world_trends = get_world_trends()
+
+        print(
+            f"World trends collected: "
+            f"{len(world_trends)}"
+        )
+
+        if not world_trends:
+            raise RuntimeError(
+                "No World YouTube trend data found."
+            )
+
+        # ----------------------------------------------------
+        # STEP 3 — GEMINI REPORT
+        # ----------------------------------------------------
+
+        print()
+        print("[3/6] Generating YouTube trend report...")
+
+        report = generate_report(
+            india_trends,
+            world_trends
+        )
+
+        report = clean_report(report)
+
+        if not report:
+            raise RuntimeError(
+                "Generated report is empty."
+            )
+
+        print("Report generated successfully.")
+
+        # ----------------------------------------------------
+        # STEP 4 — SAVE RAW REPORT
+        # ----------------------------------------------------
+
+        print()
+        print("[4/6] Saving raw report...")
+
+        timestamp = datetime.now().strftime(
+            "%Y%m%d_%H%M%S"
+        )
+
+        raw_file = (
+            OUTPUT_DIR
+            / f"youtube_trend_report_{timestamp}.txt"
+        )
+
+        save_raw_report(
+            report,
+            str(raw_file)
+        )
+
+        print(
+            f"Raw report saved:\n{raw_file}"
+        )
+
+        # ----------------------------------------------------
+        # STEP 5 — CREATE PDF
+        # ----------------------------------------------------
+
+        print()
+        print("[5/6] Creating PDF...")
+
+        pdf_file = (
+            OUTPUT_DIR
+            / f"YouTube_Trend_Intelligence_{timestamp}.pdf"
+        )
+
+        create_pdf(
+            report,
+            str(pdf_file)
+        )
+
+        if not pdf_file.exists():
+            raise RuntimeError(
+                "PDF was not created."
+            )
+
+        print(
+            f"PDF created successfully:\n{pdf_file}"
+        )
+
+        # ----------------------------------------------------
+        # STEP 6 — SEND EMAIL
+        # ----------------------------------------------------
+
+        print()
+        print("[6/6] Sending PDF to Gmail...")
+
+        send_pdf_email(
+            str(pdf_file)
+        )
+
+        # ----------------------------------------------------
+        # SUCCESS
+        # ----------------------------------------------------
+
+        print()
+        print("=" * 60)
+        print("             COMPLETED SUCCESSFULLY")
+        print("=" * 60)
+
+        print()
+        print(f"PDF: {pdf_file}")
+        print()
+        print("The PDF report has been sent to your email.")
+        print()
 
     except Exception as error:
 
-        print("\n" + "=" * 60)
-        print("WORKFLOW FAILED")
+        print()
+        print("=" * 60)
+        print("                 FAILED")
         print("=" * 60)
 
-        print(f"\nError: {error}")
+        print()
+        print(f"Error: {error}")
+        print()
 
         raise
+
+
+# ============================================================
+# MAIN ENTRY POINT
+# ============================================================
+
+if __name__ == "__main__":
+    main()

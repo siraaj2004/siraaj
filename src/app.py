@@ -101,14 +101,14 @@ def main():
     # STEP 2: Generate Trend Report
     # --------------------------------------------------------
 
-   print("\n[2/3] Generating trend report...")
+    print("\n[2/3] Generating trend report...")
 
-report = generate_report(india_trending_data, world_trending_data)
+    report = generate_report(india_trending_data, world_trending_data)
 
-if not report:
-    raise RuntimeError(
-        "AI failed to generate the trend report."
-    )
+    if not report:
+        raise RuntimeError(
+            "AI failed to generate the trend report."
+        )
 
     print("Trend report generated successfully.")
 

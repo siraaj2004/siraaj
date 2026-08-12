@@ -52,7 +52,7 @@ if not GEMINI_API_KEY:
 # ============================================================
 
 from youtube_agent import get_trending_videos
-from idea_generator import generate_ideas
+from idea_generator import generate_report
 from sender import send_email
 
 

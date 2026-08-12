@@ -103,7 +103,7 @@ def main():
 
     print("\n[2/3] Generating trend report...")
 
-    report = generate_ideas(india_trending_data, world_trending_data)
+   report = generate_report(india_trending_data, world_trending_data)
 
     if not report:
         raise RuntimeError(

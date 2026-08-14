@@ -2,52 +2,120 @@ name: YouTube Trend Analysis
 
 on:
   workflow_dispatch:
+
   schedule:
+    # 9:00 AM IST = 03:30 UTC
     - cron: "30 3 * * *"
 
 jobs:
   trend-analysis:
+
     runs-on: ubuntu-latest
 
     steps:
 
+      # ==========================================
+      # 1. CHECKOUT
+      # ==========================================
+
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+
+      # ==========================================
+      # 2. PYTHON
+      # ==========================================
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+
+      # ==========================================
+      # 3. INSTALL DEPENDENCIES
+      # ==========================================
+
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+
+      # ==========================================
+      # 4. CREATE .env
+      # ==========================================
+
       - name: Create .env File
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+
         run: |
           cat > .env <<EOF
-          YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}
-          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+          YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+          GEMINI_API_KEY=${GEMINI_API_KEY}
+          RESEND_API_KEY=${RESEND_API_KEY}
+          FROM_EMAIL=${FROM_EMAIL}
+          RECIPIENT_EMAIL=${RECIPIENT_EMAIL}
           EOF
 
-      - name: Verify Project Structure
+
+      # ==========================================
+      # 5. VERIFY ENVIRONMENT
+      # ==========================================
+
+      - name: Verify Environment
         run: |
-          echo "Project root:"
-          pwd
+          python - <<'PY'
+          import os
+          from dotenv import load_dotenv
 
-          echo "Files:"
-          ls -la
+          load_dotenv(".env")
 
-          echo "src files:"
-          ls -la src
+          variables = [
+              "YOUTUBE_API_KEY",
+              "GEMINI_API_KEY",
+              "RESEND_API_KEY",
+              "FROM_EMAIL",
+              "RECIPIENT_EMAIL",
+          ]
 
-          echo ".env exists:"
-          test -f .env && echo "YES - .env found" || echo "NO - .env missing"
+          print("Checking environment variables...")
+
+          failed = False
+
+          for name in variables:
+              value = os.getenv(name)
+
+              if value:
+                  print(f"✓ {name} found")
+              else:
+                  print(f"❌ {name} missing")
+                  failed = True
+
+          if failed:
+              raise SystemExit("Required environment variables are missing.")
+
+          print("✓ All required environment variables found")
+          PY
+
+
+      # ==========================================
+      # 6. RUN MAIN APP
+      # ==========================================
 
       - name: Run YouTube Trend Analysis
         run: |
           python src/app.py
+
+
+      # ==========================================
+      # 7. UPLOAD PDF
+      # ==========================================
 
       - name: Upload Generated PDF
         if: always()
@@ -58,4 +126,6 @@ jobs:
             *.pdf
             reports/*.pdf
             output/*.pdf
+            generated/*.pdf
+            pdf/*.pdf
           if-no-files-found: ignore

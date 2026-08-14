@@ -2,12 +2,33 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 
 # ============================================================
-# PROJECT PATH
+# PROJECT PATH & ENV LOADING
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load .env from root directory (where workflow creates it)
+env_file = BASE_DIR / ".env"
+load_dotenv(env_file)
+
+# Verify required environment variables are loaded
+required_env_vars = [
+    "YOUTUBE_API_KEY",
+    "GEMINI_API_KEY",
+    "RECIPIENT_EMAIL",
+    "FROM_EMAIL",
+    "RESEND_API_KEY"
+]
+
+missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+if missing_vars:
+    raise RuntimeError(
+        f"Missing required environment variables: {', '.join(missing_vars)}\n"
+        f"Expected .env file at: {env_file}"
+    )
 
 # Allow app.py to import idea_generator.py from project root
 sys.path.insert(0, str(BASE_DIR))

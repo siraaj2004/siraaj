@@ -2,18 +2,15 @@ name: YouTube Trend Analysis
 
 on:
   workflow_dispatch:
-
   schedule:
-    - cron: "0 3 * * *"
-    - cron: "30 6 * * *"
-    - cron: "30 10 * * *"
-    - cron: "0 16 * * *"
+    - cron: "30 3 * * *"
 
 jobs:
   trend-analysis:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -22,47 +19,43 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check Repository Files
-        run: |
-          echo "Current directory:"
-          pwd
-
-          echo ""
-          echo "Repository files:"
-          find . -maxdepth 3 -type f | sort
-
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            echo "No requirements.txt found."
-          fi
+          pip install -r requirements.txt
 
       - name: Create .env File
         run: |
-          echo "YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}" > .env
-          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
-          echo "RECIPIENT_EMAIL=${{ secrets.RECIPIENT_EMAIL }}" >> .env
-          echo "FROM_EMAIL=${{ secrets.FROM_EMAIL }}" >> .env
-          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> .env
-          
-          echo ""
-          echo ".env file created at:"
-          ls -la .env
+          cat > .env <<EOF
+          YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}
+          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+          EOF
+
+      - name: Verify Project Structure
+        run: |
+          echo "Project root:"
+          pwd
+
+          echo "Files:"
+          ls -la
+
+          echo "src files:"
+          ls -la src
+
+          echo ".env exists:"
+          test -f .env && echo "YES - .env found" || echo "NO - .env missing"
 
       - name: Run YouTube Trend Analysis
-        run: python src/app.py
+        run: |
+          python src/app.py
 
       - name: Upload Generated PDF
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trend-analysis-report
+          name: youtube-trend-report
           path: |
             *.pdf
-            output/*.pdf
             reports/*.pdf
+            output/*.pdf
           if-no-files-found: ignore

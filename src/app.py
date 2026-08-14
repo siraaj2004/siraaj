@@ -10,9 +10,25 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load .env from root directory (where workflow creates it)
-env_file = BASE_DIR / ".env"
-load_dotenv(env_file)
+# Try loading .env from multiple locations
+env_paths = [
+    BASE_DIR / ".env",                    # Root directory
+    Path.cwd() / ".env",                  # Current working directory
+    Path("/home/runner/work/siraaj/siraaj/.env")  # GitHub Actions path
+]
+
+env_loaded = False
+for env_file in env_paths:
+    if env_file.exists():
+        print(f"Loading .env from: {env_file}")
+        load_dotenv(env_file)
+        env_loaded = True
+        break
+
+if not env_loaded:
+    print(f"Warning: No .env file found in any of these locations:")
+    for path in env_paths:
+        print(f"  - {path}")
 
 # Verify required environment variables are loaded
 required_env_vars = [
@@ -27,7 +43,7 @@ missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 if missing_vars:
     raise RuntimeError(
         f"Missing required environment variables: {', '.join(missing_vars)}\n"
-        f"Expected .env file at: {env_file}"
+        f"Checked locations: {', '.join(str(p) for p in env_paths)}"
     )
 
 # Allow app.py to import idea_generator.py from project root

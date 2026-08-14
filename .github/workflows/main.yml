@@ -43,26 +43,20 @@ jobs:
 
       - name: Create .env File
         run: |
-          echo "YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}" >> .env
+          echo "YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}" > .env
           echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
           echo "RECIPIENT_EMAIL=${{ secrets.RECIPIENT_EMAIL }}" >> .env
           echo "FROM_EMAIL=${{ secrets.FROM_EMAIL }}" >> .env
           echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> .env
+          
+          echo ""
+          echo ".env file created at:"
+          pwd
+          ls -la .env
 
       - name: Run YouTube Trend Analysis
         run: |
-          if [ -f "src/app.py" ]; then
-            echo "Found src/app.py"
-            python src/app.py
-          elif [ -f "app.py" ]; then
-            echo "Found app.py"
-            python app.py
-          else
-            echo "ERROR: app.py was not found!"
-            echo "Available Python files:"
-            find . -type f -name "*.py" | sort
-            exit 1
-          fi
+          python src/app.py
 
       - name: Upload Generated PDF
         if: always()

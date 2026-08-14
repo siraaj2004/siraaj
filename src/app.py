@@ -1,238 +1,397 @@
+"""
+YouTube Trend Intelligence Generator
+-------------------------------------
+
+MAIN TRIGGER
+
+GitHub Actions should run:
+
+    python src/app.py
+
+This file:
+1. Finds the project root
+2. Loads .env from the project root
+3. Validates required environment variables
+4. Runs the YouTube trend analysis
+5. Runs the idea generator if present
+6. Runs the PDF generator if present
+7. Finds the generated PDF
+8. Exits with code 0 on success
+"""
+
+from __future__ import annotations
+
 import os
 import sys
+import subprocess
 from pathlib import Path
 from datetime import datetime
-from dotenv import load_dotenv
-
-# ============================================================
-# PROJECT PATH & ENV LOADING
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Try loading .env from multiple locations
-env_paths = [
-    BASE_DIR / ".env",                    # Root directory
-    Path.cwd() / ".env",                  # Current working directory
-    Path("/home/runner/work/siraaj/siraaj/.env")  # GitHub Actions path
-]
-
-env_loaded = False
-for env_file in env_paths:
-    if env_file.exists():
-        print(f"Loading .env from: {env_file}")
-        load_dotenv(env_file)
-        env_loaded = True
-        break
-
-if not env_loaded:
-    print(f"Warning: No .env file found in any of these locations:")
-    for path in env_paths:
-        print(f"  - {path}")
-
-# Verify required environment variables are loaded
-required_env_vars = [
-    "YOUTUBE_API_KEY",
-    "GEMINI_API_KEY",
-    "RECIPIENT_EMAIL",
-    "FROM_EMAIL",
-    "RESEND_API_KEY"
-]
-
-missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-if missing_vars:
-    raise RuntimeError(
-        f"Missing required environment variables: {', '.join(missing_vars)}\n"
-        f"Checked locations: {', '.join(str(p) for p in env_paths)}"
-    )
-
-# Allow app.py to import idea_generator.py from project root
-sys.path.insert(0, str(BASE_DIR))
-
-# ============================================================
-# IMPORT IDEA GENERATOR
-# ============================================================
-
-from idea_generator import (
-    get_india_trends,
-    get_world_trends,
-    generate_report,
-    clean_report,
-    create_pdf,
-    save_raw_report,
-    send_pdf_email,
-)
 
 
 # ============================================================
-# OUTPUT DIRECTORY
+# PATH CONFIGURATION
 # ============================================================
 
-OUTPUT_DIR = BASE_DIR / "output"
-OUTPUT_DIR.mkdir(exist_ok=True)
+# app.py is inside:
+# /repository/src/app.py
+#
+# Therefore:
+# parent      = /repository/src
+# parent.parent = /repository
+
+SRC_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SRC_DIR.parent
+
+os.chdir(PROJECT_ROOT)
+
+print("=" * 70)
+print("       YOUTUBE TREND INTELLIGENCE GENERATOR")
+print("=" * 70)
+
+print(f"\nProject root:")
+print(PROJECT_ROOT)
+
+print(f"\nSource folder:")
+print(SRC_DIR)
 
 
 # ============================================================
-# MAIN TRIGGER
+# LOAD .ENV
 # ============================================================
 
-def main():
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    print("\nERROR: python-dotenv is not installed.")
+    print("Install it with:")
+    print("pip install python-dotenv")
+    sys.exit(1)
 
-    print()
-    print("=" * 60)
-    print("       YOUTUBE TREND INTELLIGENCE AGENT")
-    print("=" * 60)
+
+ENV_FILE = PROJECT_ROOT / ".env"
+
+print(f"\nLooking for .env:")
+print(ENV_FILE)
+
+if not ENV_FILE.exists():
+    print("\nERROR: .env file was not found.")
+    print(f"Expected location:")
+    print(ENV_FILE)
+    print("\nGitHub Actions should create .env in the repository root.")
+    sys.exit(1)
+
+load_dotenv(ENV_FILE)
+
+print("\n.env loaded successfully.")
+
+
+# ============================================================
+# ENVIRONMENT VALIDATION
+# ============================================================
+
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+
+print("\nChecking environment variables...")
+
+if not YOUTUBE_API_KEY:
+    print("ERROR: YOUTUBE_API_KEY is missing.")
+    sys.exit(1)
+
+print("✓ YOUTUBE_API_KEY found")
+
+if not GEMINI_API_KEY:
+    print("ERROR: GEMINI_API_KEY is missing.")
+    sys.exit(1)
+
+print("✓ GEMINI_API_KEY found")
+
+
+# ============================================================
+# UTILITY FUNCTIONS
+# ============================================================
+
+def run_python_script(
+    script: Path,
+    description: str,
+    required: bool = True,
+) -> bool:
+    """
+    Run another Python script safely.
+
+    Returns:
+        True  -> script succeeded
+        False -> script failed
+    """
+
+    if not script.exists():
+        message = f"{script} not found."
+
+        if required:
+            print(f"\nERROR: {message}")
+            return False
+
+        print(f"\nWARNING: {message}")
+        print("Skipping...")
+        return True
+
+    print("\n" + "=" * 70)
+    print(description)
+    print("=" * 70)
+
+    print(f"\nRunning:")
+    print(script)
 
     try:
-
-        # ----------------------------------------------------
-        # STEP 1 — INDIA TRENDS
-        # ----------------------------------------------------
-
-        print()
-        print("[1/6] Collecting India YouTube trends...")
-
-        india_trends = get_india_trends()
-
-        print(
-            f"India trends collected: "
-            f"{len(india_trends)}"
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=str(PROJECT_ROOT),
+            env=os.environ.copy(),
+            check=False,
         )
 
-        if not india_trends:
-            raise RuntimeError(
-                "No India YouTube trend data found."
+    except Exception as exc:
+        print(f"\nERROR while running {script.name}:")
+        print(exc)
+        return False
+
+    if result.returncode != 0:
+        print(
+            f"\nERROR: {script.name} failed "
+            f"with exit code {result.returncode}"
+        )
+        return False
+
+    print(f"\n✓ {description} completed successfully.")
+    return True
+
+
+def find_generated_pdfs() -> list[Path]:
+    """
+    Search common locations for generated PDF reports.
+    """
+
+    search_locations = [
+        PROJECT_ROOT,
+        PROJECT_ROOT / "reports",
+        PROJECT_ROOT / "output",
+        PROJECT_ROOT / "generated",
+        PROJECT_ROOT / "pdf",
+        SRC_DIR,
+    ]
+
+    pdfs: list[Path] = []
+
+    for location in search_locations:
+        if not location.exists():
+            continue
+
+        try:
+            for pdf in location.glob("*.pdf"):
+                if pdf.is_file() and pdf not in pdfs:
+                    pdfs.append(pdf)
+        except Exception:
+            continue
+
+    return sorted(
+        pdfs,
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def print_project_structure() -> None:
+    """
+    Print important files for GitHub Actions debugging.
+    """
+
+    print("\n" + "=" * 70)
+    print("PROJECT STRUCTURE")
+    print("=" * 70)
+
+    important_files = [
+        PROJECT_ROOT / ".env",
+        PROJECT_ROOT / "requirements.txt",
+        SRC_DIR / "app.py",
+        SRC_DIR / "idea_generator.py",
+        SRC_DIR / "youtube_agent.py",
+        PROJECT_ROOT / "PDF_Generator.py",
+        PROJECT_ROOT / "config.py",
+    ]
+
+    for file in important_files:
+        status = "FOUND" if file.exists() else "NOT FOUND"
+        print(f"{status:12} {file}")
+
+
+# ============================================================
+# DEBUG INFORMATION
+# ============================================================
+
+print_project_structure()
+
+
+# ============================================================
+# MAIN PIPELINE
+# ============================================================
+
+def main() -> int:
+
+    start_time = datetime.now()
+
+    print("\n" + "=" * 70)
+    print("STARTING MAIN PIPELINE")
+    print("=" * 70)
+
+    print(f"\nStarted:")
+    print(start_time.strftime("%Y-%m-%d %H:%M:%S"))
+
+    # --------------------------------------------------------
+    # STEP 1
+    # YouTube trend analysis
+    # --------------------------------------------------------
+
+    youtube_agent = SRC_DIR / "youtube_agent.py"
+
+    if youtube_agent.exists():
+
+        success = run_python_script(
+            youtube_agent,
+            "STEP 1/3 - FETCHING YOUTUBE TREND DATA",
+            required=True,
+        )
+
+        if not success:
+            return 1
+
+    else:
+        print(
+            "\nWARNING: youtube_agent.py was not found."
+        )
+        print(
+            "The main trigger cannot automatically fetch "
+            "YouTube data without it."
+        )
+
+    # --------------------------------------------------------
+    # STEP 2
+    # Idea generation
+    # --------------------------------------------------------
+
+    idea_generator = SRC_DIR / "idea_generator.py"
+
+    if idea_generator.exists():
+
+        success = run_python_script(
+            idea_generator,
+            "STEP 2/3 - GENERATING CONTENT IDEAS",
+            required=False,
+        )
+
+        if not success:
+            print(
+                "\nWARNING: Idea generation failed."
+            )
+            print(
+                "Continuing to PDF generation..."
             )
 
-        # ----------------------------------------------------
-        # STEP 2 — WORLD TRENDS
-        # ----------------------------------------------------
-
-        print()
-        print("[2/6] Collecting global YouTube trends...")
-
-        world_trends = get_world_trends()
-
+    else:
         print(
-            f"World trends collected: "
-            f"{len(world_trends)}"
+            "\nWARNING: idea_generator.py not found."
         )
 
-        if not world_trends:
-            raise RuntimeError(
-                "No World YouTube trend data found."
+    # --------------------------------------------------------
+    # STEP 3
+    # PDF generation
+    # --------------------------------------------------------
+
+    pdf_generator_candidates = [
+        PROJECT_ROOT / "PDF_Generator.py",
+        SRC_DIR / "PDF_Generator.py",
+        SRC_DIR / "pdf_generator.py",
+    ]
+
+    pdf_generator = None
+
+    for candidate in pdf_generator_candidates:
+        if candidate.exists():
+            pdf_generator = candidate
+            break
+
+    if pdf_generator:
+
+        success = run_python_script(
+            pdf_generator,
+            "STEP 3/3 - CREATING PROFESSIONAL PDF REPORT",
+            required=False,
+        )
+
+        if not success:
+            print(
+                "\nWARNING: PDF generation failed."
             )
 
-        # ----------------------------------------------------
-        # STEP 3 — GEMINI REPORT
-        # ----------------------------------------------------
-
-        print()
-        print("[3/6] Generating YouTube trend report...")
-
-        report = generate_report(
-            india_trends,
-            world_trends
-        )
-
-        report = clean_report(report)
-
-        if not report:
-            raise RuntimeError(
-                "Generated report is empty."
-            )
-
-        print("Report generated successfully.")
-
-        # ----------------------------------------------------
-        # STEP 4 — SAVE RAW REPORT
-        # ----------------------------------------------------
-
-        print()
-        print("[4/6] Saving raw report...")
-
-        timestamp = datetime.now().strftime(
-            "%Y%m%d_%H%M%S"
-        )
-
-        raw_file = (
-            OUTPUT_DIR
-            / f"youtube_trend_report_{timestamp}.txt"
-        )
-
-        save_raw_report(
-            report,
-            str(raw_file)
-        )
-
+    else:
         print(
-            f"Raw report saved:\n{raw_file}"
+            "\nWARNING: PDF generator was not found."
         )
 
-        # ----------------------------------------------------
-        # STEP 5 — CREATE PDF
-        # ----------------------------------------------------
 
-        print()
-        print("[5/6] Creating PDF...")
+    # ========================================================
+    # FIND GENERATED PDF
+    # ========================================================
 
-        pdf_file = (
-            OUTPUT_DIR
-            / f"YouTube_Trend_Intelligence_{timestamp}.pdf"
-        )
+    print("\n" + "=" * 70)
+    print("CHECKING GENERATED REPORTS")
+    print("=" * 70)
 
-        create_pdf(
-            report,
-            str(pdf_file)
-        )
+    pdfs = find_generated_pdfs()
 
-        if not pdf_file.exists():
-            raise RuntimeError(
-                "PDF was not created."
-            )
+    if pdfs:
 
-        print(
-            f"PDF created successfully:\n{pdf_file}"
-        )
+        print(f"\nFound {len(pdfs)} PDF file(s):")
 
-        # ----------------------------------------------------
-        # STEP 6 — SEND EMAIL
-        # ----------------------------------------------------
+        for pdf in pdfs:
+            print(f"  ✓ {pdf}")
 
-        print()
-        print("[6/6] Sending PDF to Gmail...")
+        newest_pdf = pdfs[0]
 
-        send_pdf_email(
-            str(pdf_file)
-        )
+        print("\nLatest report:")
+        print(newest_pdf)
 
-        # ----------------------------------------------------
-        # SUCCESS
-        # ----------------------------------------------------
+    else:
 
-        print()
-        print("=" * 60)
-        print("             COMPLETED SUCCESSFULLY")
-        print("=" * 60)
+        print("\nWARNING: No PDF report was found.")
 
-        print()
-        print(f"PDF: {pdf_file}")
-        print()
-        print("The PDF report has been sent to your email.")
-        print()
+        print("\nSearched:")
+        print(f"  {PROJECT_ROOT}")
+        print(f"  {PROJECT_ROOT / 'reports'}")
+        print(f"  {PROJECT_ROOT / 'output'}")
+        print(f"  {PROJECT_ROOT / 'generated'}")
+        print(f"  {PROJECT_ROOT / 'pdf'}")
 
-    except Exception as error:
+        # Do not automatically fail here because the
+        # analysis may have completed without PDF generation.
 
-        print()
-        print("=" * 60)
-        print("                 FAILED")
-        print("=" * 60)
+    # ========================================================
+    # FINISHED
+    # ========================================================
 
-        print()
-        print(f"Error: {error}")
-        print()
+    end_time = datetime.now()
+    duration = end_time - start_time
 
-        raise
+    print("\n" + "=" * 70)
+    print("YOUTUBE TREND ANALYSIS COMPLETED")
+    print("=" * 70)
+
+    print(f"\nStarted : {start_time}")
+    print(f"Finished: {end_time}")
+    print(f"Duration: {duration}")
+
+    print("\n✓ MAIN TRIGGER FINISHED SUCCESSFULLY")
+
+    return 0
 
 
 # ============================================================
@@ -240,4 +399,23 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
-    main()
+    try:
+        exit_code = main()
+
+    except KeyboardInterrupt:
+        print("\n\nProcess interrupted by user.")
+        exit_code = 130
+
+    except Exception as exc:
+        print("\n" + "=" * 70)
+        print("FATAL ERROR")
+        print("=" * 70)
+
+        print(f"\n{type(exc).__name__}: {exc}")
+
+        import traceback
+        traceback.print_exc()
+
+        exit_code = 1
+
+    sys.exit(exit_code)

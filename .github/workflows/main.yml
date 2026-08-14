@@ -56,6 +56,7 @@ jobs:
 
       - name: Run YouTube Trend Analysis
         run: |
+          cd /home/runner/work/siraaj/siraaj
           python src/app.py
 
       - name: Upload Generated PDF

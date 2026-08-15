@@ -4,8 +4,16 @@ on:
   workflow_dispatch:
 
   schedule:
+    # IST Timings: 9:00 AM, 12:00 PM, 4:00 PM, 8:00 PM
+    # Converted to UTC (IST = UTC + 5:30):
     # 9:00 AM IST = 03:30 UTC
     - cron: "30 3 * * *"
+    # 12:00 PM IST = 06:30 UTC
+    - cron: "30 6 * * *"
+    # 4:00 PM IST = 10:30 UTC
+    - cron: "30 10 * * *"
+    # 8:00 PM IST = 14:30 UTC
+    - cron: "30 14 * * *"
 
 jobs:
   trend-analysis:
@@ -55,7 +63,8 @@ jobs:
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
 
         run: |
-          cat > .env <<EOF
+          mkdir -p src
+          cat > src/.env <<EOF
           YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
           GEMINI_API_KEY=${GEMINI_API_KEY}
           RESEND_API_KEY=${RESEND_API_KEY}
@@ -73,9 +82,9 @@ jobs:
           python - <<'PY'
           import os
           from dotenv import load_dotenv
-
-          load_dotenv(".env")
-
+          
+          load_dotenv("src/.env")
+          
           variables = [
               "YOUTUBE_API_KEY",
               "GEMINI_API_KEY",
@@ -83,23 +92,23 @@ jobs:
               "FROM_EMAIL",
               "RECIPIENT_EMAIL",
           ]
-
+          
           print("Checking environment variables...")
-
+          
           failed = False
-
+          
           for name in variables:
               value = os.getenv(name)
-
+              
               if value:
                   print(f"✓ {name} found")
               else:
                   print(f"❌ {name} missing")
                   failed = True
-
+          
           if failed:
               raise SystemExit("Required environment variables are missing.")
-
+          
           print("✓ All required environment variables found")
           PY
 
@@ -110,7 +119,7 @@ jobs:
 
       - name: Run YouTube Trend Analysis
         run: |
-          python src/app.py
+          python src/idea_generator.py
 
 
       # ==========================================
@@ -123,9 +132,8 @@ jobs:
         with:
           name: youtube-trend-report
           path: |
-            *.pdf
-            reports/*.pdf
-            output/*.pdf
-            generated/*.pdf
-            pdf/*.pdf
+            src/reports/*.pdf
+            src/output/*.pdf
+            src/generated/*.pdf
+            src/pdf/*.pdf
           if-no-files-found: ignore

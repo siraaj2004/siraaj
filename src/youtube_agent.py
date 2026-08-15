@@ -4,6 +4,8 @@ Fetch trending YouTube videos using YouTube Data API v3.
 """
 
 import os
+import json
+from pathlib import Path
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -71,11 +73,25 @@ def get_trending_videos(region_code="IN", max_results=20):
 def run_agent(region_code="IN", max_results=20):
     """
     Main function used by app.py
+    Fetches trending videos and saves them to data/youtube_trends.json
     """
-    return get_trending_videos(
+    videos = get_trending_videos(
         region_code=region_code,
         max_results=max_results
     )
+    
+    # Create data directory if it doesn't exist
+    data_dir = Path("data")
+    data_dir.mkdir(exist_ok=True)
+    
+    # Save to JSON file
+    output_file = data_dir / "youtube_trends.json"
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(videos, f, indent=2, ensure_ascii=False)
+    
+    print(f"✓ Trend data saved to {output_file}")
+    
+    return videos
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from datetime import datetime
 # HackerNews API URLs
 
 TOP_STORIES_URL = "https://hacker-news.firebaseio.com/v0/topstories.json"
-ITEM_URL = "https://hacker-news.firebaseio.com/v0/item/{}.json"
+ITEM_URL = "https://hacker-news.firebaseio.com/v0/item/{}.json" 
 
 # Required header for API requests
 

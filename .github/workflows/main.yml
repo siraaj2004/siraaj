@@ -4,35 +4,27 @@ on:
   workflow_dispatch:
 
   schedule:
-    # IST Timings: 9:00 AM, 12:00 PM, 4:00 PM, 8:00 PM
-    # Converted to UTC (IST = UTC + 5:30):
     # 9:00 AM IST = 03:30 UTC
     - cron: "30 3 * * *"
+
     # 12:00 PM IST = 06:30 UTC
     - cron: "30 6 * * *"
+
     # 4:00 PM IST = 10:30 UTC
     - cron: "30 10 * * *"
+
     # 8:00 PM IST = 14:30 UTC
     - cron: "30 14 * * *"
 
 jobs:
   trend-analysis:
-
     runs-on: ubuntu-latest
 
     steps:
 
-      # ==========================================
-      # 1. CHECKOUT
-      # ==========================================
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-
-      # ==========================================
-      # 2. PYTHON
-      # ==========================================
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,19 +32,11 @@ jobs:
           python-version: "3.12"
 
 
-      # ==========================================
-      # 3. INSTALL DEPENDENCIES
-      # ==========================================
-
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-
-      # ==========================================
-      # 4. CREATE .env
-      # ==========================================
 
       - name: Create .env File
         env:
@@ -63,28 +47,23 @@ jobs:
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
 
         run: |
-          mkdir -p src
-          cat > src/.env <<EOF
-          YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
-          GEMINI_API_KEY=${GEMINI_API_KEY}
-          RESEND_API_KEY=${RESEND_API_KEY}
-          FROM_EMAIL=${FROM_EMAIL}
-          RECIPIENT_EMAIL=${RECIPIENT_EMAIL}
+          cat > src/.env << EOF
+          YOUTUBE_API_KEY=$YOUTUBE_API_KEY
+          GEMINI_API_KEY=$GEMINI_API_KEY
+          RESEND_API_KEY=$RESEND_API_KEY
+          FROM_EMAIL=$FROM_EMAIL
+          RECIPIENT_EMAIL=$RECIPIENT_EMAIL
           EOF
 
-
-      # ==========================================
-      # 5. VERIFY ENVIRONMENT
-      # ==========================================
 
       - name: Verify Environment
         run: |
           python - <<'PY'
           import os
           from dotenv import load_dotenv
-          
+
           load_dotenv("src/.env")
-          
+
           variables = [
               "YOUTUBE_API_KEY",
               "GEMINI_API_KEY",
@@ -92,48 +71,52 @@ jobs:
               "FROM_EMAIL",
               "RECIPIENT_EMAIL",
           ]
-          
-          print("Checking environment variables...")
-          
+
+          print("\nChecking environment variables...\n")
+
           failed = False
-          
+
           for name in variables:
-              value = os.getenv(name)
-              
-              if value:
+              if os.getenv(name):
                   print(f"✓ {name} found")
               else:
                   print(f"❌ {name} missing")
                   failed = True
-          
+
           if failed:
-              raise SystemExit("Required environment variables are missing.")
-          
-          print("✓ All required environment variables found")
+              raise SystemExit(
+                  "Required environment variables are missing."
+              )
+
+          print("\n✓ All environment variables found\n")
           PY
 
 
-      # ==========================================
-      # 6. RUN MAIN APP
-      # ==========================================
+      - name: Show Run Time
+        run: |
+          echo "UTC Time:"
+          date -u
+
+          echo "IST Time:"
+          TZ=Asia/Kolkata date
+
 
       - name: Run YouTube Trend Analysis
+        working-directory: .
         run: |
           python src/idea_generator.py
 
-
-      # ==========================================
-      # 7. UPLOAD PDF
-      # ==========================================
 
       - name: Upload Generated PDF
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-trend-report
+          name: youtube-trend-report-${{ github.run_number }}
+
           path: |
             src/reports/*.pdf
             src/output/*.pdf
             src/generated/*.pdf
             src/pdf/*.pdf
+
           if-no-files-found: ignore

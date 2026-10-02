@@ -1,35 +1,10 @@
 ````python
-"""
-YouTube High-Engagement Idea Generator
---------------------------------------
-
-Pipeline:
-YouTube trends
-    ↓
-AI idea generation through OpenRouter
-    ↓
-JSON parsing
-    ↓
-PDF report
-    ↓
-Optional Resend email
-
-Required .env:
-    YOUTUBE_API_KEY=
-    OPENROUTER_API_KEY=
-    RESEND_API_KEY=
-    FROM_EMAIL=
-    RECIPIENT_EMAIL=
-
-Optional:
-    OPENROUTER_MODEL=openai/gpt-4.1-mini
-"""
-
 import os
 import sys
 import json
 import time
 import re
+import base64
 from pathlib import Path
 
 import requests
@@ -41,7 +16,6 @@ from dotenv import load_dotenv
 # ============================================================
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-SRC_DIR = ROOT_DIR / "src"
 REPORTS_DIR = ROOT_DIR / "reports"
 
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -64,41 +38,29 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
 FROM_EMAIL = os.getenv("FROM_EMAIL", "").strip()
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL", "").strip()
 
-
-# ============================================================
-# VALIDATION
-# ============================================================
-
-if not OPENROUTER_API_KEY:
-    raise RuntimeError(
-        "OPENROUTER_API_KEY is missing from .env"
-    )
-
-
-# ============================================================
-# OPENROUTER
-# ============================================================
-
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
-def call_openrouter(prompt, max_retries=4):
-    """
-    Send prompt to OpenRouter with retry handling.
+# ============================================================
+# CHECK CONFIG
+# ============================================================
 
-    Handles:
-    - 429 rate limits
-    - 500 server errors
-    - 502 gateway errors
-    - 503 unavailable
-    - temporary network errors
-    """
+if not OPENROUTER_API_KEY:
+    print("ERROR: OPENROUTER_API_KEY is missing.")
+    sys.exit(1)
+
+
+# ============================================================
+# OPENROUTER CALL
+# ============================================================
+
+def call_openrouter(prompt, max_retries=4):
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
         "HTTP-Referer": "https://github.com/",
-        "X-Title": "YouTube High Engagement Idea Generator",
+        "X-Title": "Siraaj YouTube Idea Generator",
     }
 
     payload = {
@@ -107,10 +69,9 @@ def call_openrouter(prompt, max_retries=4):
             {
                 "role": "system",
                 "content": (
-                    "You are an expert YouTube entertainment story "
-                    "concept developer. Create highly engaging, realistic, "
-                    "relatable concepts with strong curiosity and logical "
-                    "payoffs."
+                    "You are an expert YouTube entertainment "
+                    "content strategist. Create original, "
+                    "high-retention and realistic video concepts."
                 ),
             },
             {
@@ -122,15 +83,16 @@ def call_openrouter(prompt, max_retries=4):
         "max_tokens": 12000,
     }
 
-    last_error = None
+    last_error = ""
 
     for attempt in range(1, max_retries + 1):
 
-        try:
+        print(
+            f"    OpenRouter attempt "
+            f"{attempt}/{max_retries}..."
+        )
 
-            print(
-                f"    OpenRouter attempt {attempt}/{max_retries}..."
-            )
+        try:
 
             response = requests.post(
                 OPENROUTER_URL,
@@ -138,10 +100,6 @@ def call_openrouter(prompt, max_retries=4):
                 json=payload,
                 timeout=120,
             )
-
-            # ------------------------------------------------
-            # SUCCESS
-            # ------------------------------------------------
 
             if response.status_code == 200:
 
@@ -165,39 +123,40 @@ def call_openrouter(prompt, max_retries=4):
                         "OpenRouter returned empty content."
                     )
 
+                print("    OpenRouter response received.")
+
                 return content
 
-            # ------------------------------------------------
-            # TEMPORARY ERRORS
-            # ------------------------------------------------
-
-            if response.status_code in {
+            if response.status_code in (
                 429,
                 500,
                 502,
                 503,
                 504,
-            }:
+            ):
 
                 last_error = (
                     f"HTTP {response.status_code}: "
                     f"{response.text[:500]}"
                 )
 
-                wait_seconds = min(5 * attempt, 20)
+                wait_time = min(
+                    attempt * 5,
+                    20
+                )
 
                 print(
                     f"    Temporary API error "
-                    f"({response.status_code}). "
-                    f"Retrying in {wait_seconds}s..."
+                    f"{response.status_code}."
                 )
 
-                time.sleep(wait_seconds)
-                continue
+                print(
+                    f"    Retrying in {wait_time} seconds..."
+                )
 
-            # ------------------------------------------------
-            # PERMANENT ERROR
-            # ------------------------------------------------
+                time.sleep(wait_time)
+
+                continue
 
             raise RuntimeError(
                 f"OpenRouter API error "
@@ -209,17 +168,20 @@ def call_openrouter(prompt, max_retries=4):
 
             last_error = str(exc)
 
-            wait_seconds = min(5 * attempt, 20)
+            wait_time = min(
+                attempt * 5,
+                20
+            )
 
             print(
                 f"    Network error: {exc}"
             )
 
             print(
-                f"    Retrying in {wait_seconds}s..."
+                f"    Retrying in {wait_time} seconds..."
             )
 
-            time.sleep(wait_seconds)
+            time.sleep(wait_time)
 
     raise RuntimeError(
         "OpenRouter failed after all retries.\n"
@@ -228,50 +190,39 @@ def call_openrouter(prompt, max_retries=4):
 
 
 # ============================================================
-# JSON CLEANER
+# EXTRACT JSON
 # ============================================================
 
 def extract_json(text):
-    """
-    Extract JSON from AI response.
-
-    Handles:
-    ```json
-    {...}
-    ```
-
-    and plain JSON.
-    """
 
     text = text.strip()
 
-    # Remove markdown fences
+    # Remove Markdown code fences if AI adds them
     text = re.sub(
-        r"^```(?:json)?\s*",
+        r"^```(?:json|JSON)?\s*",
         "",
-        text,
-        flags=re.IGNORECASE,
+        text
     )
 
     text = re.sub(
         r"\s*```$",
         "",
-        text,
+        text
     )
 
     text = text.strip()
 
-    # Direct JSON
+    # Try direct JSON
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # Find first JSON object
+    # Find JSON object
     start = text.find("{")
     end = text.rfind("}")
 
-    if start != -1 and end != -1 and end > start:
+    if start >= 0 and end > start:
 
         candidate = text[start:end + 1]
 
@@ -284,7 +235,7 @@ def extract_json(text):
     start = text.find("[")
     end = text.rfind("]")
 
-    if start != -1 and end != -1 and end > start:
+    if start >= 0 and end > start:
 
         candidate = text[start:end + 1]
 
@@ -294,70 +245,69 @@ def extract_json(text):
             pass
 
     raise ValueError(
-        "Could not extract valid JSON from AI response."
+        "AI response did not contain valid JSON."
     )
 
 
 # ============================================================
-# VIDEO NORMALIZER
+# NORMALIZE YOUTUBE DATA
 # ============================================================
 
 def normalize_video(video):
-    """
-    Prevents errors when YouTube data contains unexpected
-    structures.
-    """
 
-    if isinstance(video, dict):
+    if not isinstance(video, dict):
+
         return {
-            "title": str(video.get("title", "")),
-            "channel": str(
-                video.get("channel")
-                or video.get("channel_title")
-                or ""
-            ),
-            "url": str(
-                video.get("url")
-                or video.get("video_url")
-                or ""
-            ),
-            "views": video.get("views", 0),
-            "published": str(
-                video.get("published")
-                or video.get("published_at")
-                or ""
-            ),
+            "title": str(video),
+            "channel": "",
+            "views": 0,
+            "url": "",
+            "published": "",
         }
 
     return {
-        "title": str(video),
-        "channel": "",
-        "url": "",
-        "views": 0,
-        "published": "",
+        "title": str(
+            video.get("title", "")
+        ),
+        "channel": str(
+            video.get("channel")
+            or video.get("channel_title")
+            or ""
+        ),
+        "views": video.get(
+            "views",
+            video.get("view_count", 0)
+        ),
+        "url": str(
+            video.get("url")
+            or video.get("video_url")
+            or ""
+        ),
+        "published": str(
+            video.get("published")
+            or video.get("published_at")
+            or ""
+        ),
     }
 
 
 # ============================================================
-# BUILD TREND TEXT
+# TREND CONTEXT
 # ============================================================
 
 def build_trend_context(videos):
 
-    normalized = [
-        normalize_video(video)
-        for video in videos
-    ]
-
     lines = []
 
-    for index, video in enumerate(normalized, 1):
+    for index, video in enumerate(videos, 1):
+
+        item = normalize_video(video)
 
         lines.append(
-            f"{index}. {video['title']}\n"
-            f"   Channel: {video['channel']}\n"
-            f"   Views: {video['views']}\n"
-            f"   URL: {video['url']}\n"
+            f"{index}. {item['title']}\n"
+            f"Channel: {item['channel']}\n"
+            f"Views: {item['views']}\n"
+            f"URL: {item['url']}\n"
         )
 
     return "\n".join(lines)
@@ -372,99 +322,70 @@ def generate_ideas(videos, number_of_ideas=24):
     trend_context = build_trend_context(videos)
 
     prompt = f"""
-Create exactly {number_of_ideas} ORIGINAL YouTube entertainment
-video concepts inspired by the trend signals below.
+Create exactly {number_of_ideas} original YouTube entertainment
+video concepts based on the trend signals below.
 
-IMPORTANT:
+Do NOT copy the existing videos.
 
-Do NOT simply copy the videos.
+The concepts should be suitable for an Indian/Telugu audience.
 
-Use the trends only as inspiration for:
+Focus on:
+
 - curiosity
-- viewer psychology
-- hooks
-- formats
-- situations
-- themes
-- entertainment patterns
+- suspense
+- mystery
+- comedy
+- relatable situations
+- strong hooks
+- retention
+- logical reveals
+- simple production
 
-The concepts must work for an Indian/Telugu audience while remaining
-understandable to normal viewers.
+Each idea must contain:
 
-QUALITY REQUIREMENTS:
+1. title
+2. hook
+3. story_log
+4. investigation
+5. clues
+6. wrong_theory
+7. escalation
+8. reveal
+9. comedy_payoff
+10. production_level
+11. short_version
+12. long_version
 
-Every concept should have:
-
-1. A relatable everyday setup.
-2. A specific unusual contradiction/problem.
-3. A strong curiosity question.
-4. A reason for the protagonist to investigate.
-5. At least 2 meaningful clues.
-6. A believable wrong theory.
-7. Escalation.
-8. A logical final reveal.
-9. A satisfying payoff.
-10. Potential for strong audience retention.
+The stories should feel realistic.
 
 Avoid:
 
 - random ghosts
-- dreams as the twist
-- random coincidences
+- random dreams
 - meaningless prank endings
-- supernatural explanations without setup
-- childish/silly comedy
-- generic "something strange happened"
+- random coincidences
+- childish stories
 - copied movie plots
 - copied YouTube videos
 - impossible technology
-- expensive production requirements
 
-The concepts should feel like:
+Prefer locations such as:
 
-"Wait... why is this happening?"
-
-followed by:
-
-"I need to know what is actually going on."
-
-Then the ending should make the viewer think:
-
-"Ohhh... THAT'S why!"
-
-The ideas should be suitable for:
-- YouTube Shorts
-- 8–10 minute videos
-
-Prefer realistic locations such as:
 - terrace
 - apartment
 - room
 - lobby
+- staircase
 - street
 - shop
 - office
 - parking area
-- staircase
 
-Give each concept:
-
-- title
-- hook
-- story_log
-- investigation
-- clues
-- wrong_theory
-- escalation
-- reveal
-- comedy_payoff
-- production_level
-- short_version
-- long_version
+The final reveal must logically explain the mystery.
 
 Return ONLY valid JSON.
 
-Required JSON structure:
+Use exactly this structure:
 
 {{
   "ideas": [
@@ -495,97 +416,101 @@ TREND DATA:
 """
 
     print(
-        f"    Sending {len(videos)} trend videos to "
-        f"{OPENROUTER_MODEL}..."
+        f"    Generating {number_of_ideas} ideas "
+        f"using {OPENROUTER_MODEL}..."
     )
 
-    raw_response = call_openrouter(prompt)
+    response = call_openrouter(prompt)
 
-    print("    AI response received.")
-
-    data = extract_json(raw_response)
-
-    # --------------------------------------------------------
-    # Normalize output
-    # --------------------------------------------------------
+    data = extract_json(response)
 
     if isinstance(data, dict):
+
         ideas = data.get("ideas", [])
 
     elif isinstance(data, list):
+
         ideas = data
 
     else:
+
         raise ValueError(
-            "AI returned an unexpected JSON structure."
+            "Unexpected AI response format."
         )
 
-    if not isinstance(ideas, list):
+    if not ideas:
+
         raise ValueError(
-            "'ideas' must be a list."
+            "AI returned zero ideas."
         )
 
-    cleaned_ideas = []
+    cleaned = []
 
     for index, idea in enumerate(ideas, 1):
 
         if not isinstance(idea, dict):
             continue
 
-        cleaned_ideas.append({
-            "id": index,
-            "title": str(
-                idea.get("title", "")
-            ),
-            "hook": str(
-                idea.get("hook", "")
-            ),
-            "story_log": str(
-                idea.get("story_log", "")
-            ),
-            "investigation": str(
-                idea.get("investigation", "")
-            ),
-            "clues": (
-                idea.get("clues", [])
-                if isinstance(
-                    idea.get("clues", []),
-                    list
-                )
-                else []
-            ),
-            "wrong_theory": str(
-                idea.get("wrong_theory", "")
-            ),
-            "escalation": str(
-                idea.get("escalation", "")
-            ),
-            "reveal": str(
-                idea.get("reveal", "")
-            ),
-            "comedy_payoff": str(
-                idea.get("comedy_payoff", "")
-            ),
-            "production_level": str(
-                idea.get(
-                    "production_level",
-                    "Low"
-                )
-            ),
-            "short_version": str(
-                idea.get("short_version", "")
-            ),
-            "long_version": str(
-                idea.get("long_version", "")
-            ),
-        })
-
-    if not cleaned_ideas:
-        raise ValueError(
-            "AI returned zero valid ideas."
+        clues = idea.get(
+            "clues",
+            []
         )
 
-    return cleaned_ideas
+        if not isinstance(clues, list):
+            clues = [str(clues)]
+
+        cleaned.append(
+            {
+                "id": index,
+                "title": str(
+                    idea.get("title", "")
+                ),
+                "hook": str(
+                    idea.get("hook", "")
+                ),
+                "story_log": str(
+                    idea.get("story_log", "")
+                ),
+                "investigation": str(
+                    idea.get("investigation", "")
+                ),
+                "clues": [
+                    str(x) for x in clues
+                ],
+                "wrong_theory": str(
+                    idea.get("wrong_theory", "")
+                ),
+                "escalation": str(
+                    idea.get("escalation", "")
+                ),
+                "reveal": str(
+                    idea.get("reveal", "")
+                ),
+                "comedy_payoff": str(
+                    idea.get("comedy_payoff", "")
+                ),
+                "production_level": str(
+                    idea.get(
+                        "production_level",
+                        "Low"
+                    )
+                ),
+                "short_version": str(
+                    idea.get("short_version", "")
+                ),
+                "long_version": str(
+                    idea.get("long_version", "")
+                ),
+            }
+        )
+
+    if not cleaned:
+
+        raise ValueError(
+            "No valid ideas were returned."
+        )
+
+    return cleaned
 
 
 # ============================================================
@@ -594,12 +519,12 @@ TREND DATA:
 
 def save_json(ideas):
 
-    output_file = REPORTS_DIR / "ideas.json"
+    output = REPORTS_DIR / "ideas.json"
 
     with open(
-        output_file,
+        output,
         "w",
-        encoding="utf-8",
+        encoding="utf-8"
     ) as file:
 
         json.dump(
@@ -614,14 +539,14 @@ def save_json(ideas):
         )
 
     print(
-        f"    JSON saved: {output_file}"
+        f"    JSON saved: {output}"
     )
 
-    return output_file
+    return output
 
 
 # ============================================================
-# PDF
+# CREATE PDF
 # ============================================================
 
 def create_pdf(ideas):
@@ -635,36 +560,31 @@ def create_pdf(ideas):
             Spacer,
             PageBreak,
         )
-        from reportlab.lib.styles import getSampleStyleSheet
-        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.styles import (
+            getSampleStyleSheet
+        )
 
     except ImportError:
 
         print(
-            "    reportlab is not installed."
+            "WARNING: reportlab is not installed."
         )
 
         print(
-            "    Run: pip install reportlab"
+            "Run: pip install reportlab"
         )
 
         return None
 
-    output_file = (
+    output = (
         REPORTS_DIR /
         "youtube_high_engagement_ideas.pdf"
     )
 
     styles = getSampleStyleSheet()
 
-    title_style = styles["Title"]
-    title_style.alignment = TA_CENTER
-
-    heading = styles["Heading2"]
-    body = styles["BodyText"]
-
-    doc = SimpleDocTemplate(
-        str(output_file),
+    document = SimpleDocTemplate(
+        str(output),
         pagesize=A4,
         rightMargin=40,
         leftMargin=40,
@@ -677,7 +597,7 @@ def create_pdf(ideas):
     story.append(
         Paragraph(
             "YOUTUBE HIGH-ENGAGEMENT IDEAS",
-            title_style,
+            styles["Title"]
         )
     )
 
@@ -690,121 +610,123 @@ def create_pdf(ideas):
         story.append(
             Paragraph(
                 f"{index}. {idea['title']}",
-                heading,
+                styles["Heading2"]
             )
         )
 
         fields = [
             ("HOOK", idea["hook"]),
             ("STORY LOG", idea["story_log"]),
-            ("INVESTIGATION", idea["investigation"]),
+            (
+                "INVESTIGATION",
+                idea["investigation"]
+            ),
             (
                 "CLUES",
                 "<br/>".join(
-                    f"• {c}"
-                    for c in idea["clues"]
-                ),
+                    "• " + str(x)
+                    for x in idea["clues"]
+                )
             ),
             (
                 "WRONG THEORY",
-                idea["wrong_theory"],
+                idea["wrong_theory"]
             ),
             (
                 "ESCALATION",
-                idea["escalation"],
+                idea["escalation"]
             ),
             (
                 "REVEAL",
-                idea["reveal"],
+                idea["reveal"]
             ),
             (
                 "COMEDY PAYOFF",
-                idea["comedy_payoff"],
+                idea["comedy_payoff"]
             ),
             (
                 "PRODUCTION LEVEL",
-                idea["production_level"],
+                idea["production_level"]
             ),
             (
                 "SHORT VERSION",
-                idea["short_version"],
+                idea["short_version"]
             ),
             (
                 "8–10 MIN VERSION",
-                idea["long_version"],
+                idea["long_version"]
             ),
         ]
 
         for label, value in fields:
 
-            safe_value = str(value).replace(
-                "&",
-                "&amp;"
+            value = str(value)
+
+            value = (
+                value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
             )
 
             story.append(
                 Paragraph(
-                    f"<b>{label}</b><br/>{safe_value}",
-                    body,
+                    f"<b>{label}</b><br/>{value}",
+                    styles["BodyText"]
                 )
             )
 
             story.append(
-                Spacer(1, 7)
+                Spacer(1, 8)
             )
 
-        if index != len(ideas):
+        if index < len(ideas):
 
             story.append(
                 PageBreak()
             )
 
-    doc.build(story)
+    document.build(story)
 
     print(
-        f"    PDF saved: {output_file}"
+        f"    PDF saved: {output}"
     )
 
-    return output_file
+    return output
 
 
 # ============================================================
-# RESEND EMAIL
+# SEND EMAIL USING RESEND
 # ============================================================
 
 def send_email(pdf_path):
 
     if not RESEND_API_KEY:
         print(
-            "    RESEND_API_KEY not configured. "
-            "Skipping email."
+            "    RESEND_API_KEY not configured."
         )
         return False
 
     if not FROM_EMAIL:
         print(
-            "    FROM_EMAIL not configured. "
-            "Skipping email."
+            "    FROM_EMAIL not configured."
         )
         return False
 
     if not RECIPIENT_EMAIL:
         print(
-            "    RECIPIENT_EMAIL not configured. "
-            "Skipping email."
+            "    RECIPIENT_EMAIL not configured."
         )
         return False
 
     try:
 
-        import base64
-
         with open(
             pdf_path,
-            "rb",
+            "rb"
         ) as file:
 
-            encoded_pdf = base64.b64encode(
+            encoded = base64.b64encode(
                 file.read()
             ).decode()
 
@@ -814,17 +736,20 @@ def send_email(pdf_path):
             "subject": (
                 "YouTube High-Engagement Ideas"
             ),
-            "html": """
-            <h2>YouTube High-Engagement Ideas</h2>
-            <p>Your latest trend-based idea report
-            is attached.</p>
-            """,
+            "html": (
+                "<h2>"
+                "YouTube High-Engagement Ideas"
+                "</h2>"
+                "<p>"
+                "Your latest trend-based "
+                "YouTube idea report is attached."
+                "</p>"
+            ),
             "attachments": [
                 {
-                    "filename": (
-                        "youtube_high_engagement_ideas.pdf"
-                    ),
-                    "content": encoded_pdf,
+                    "filename":
+                        "youtube_high_engagement_ideas.pdf",
+                    "content": encoded,
                 }
             ],
         }
@@ -841,7 +766,10 @@ def send_email(pdf_path):
             timeout=60,
         )
 
-        if response.status_code in {200, 201}:
+        if response.status_code in (
+            200,
+            201
+        ):
 
             print(
                 "    Email sent successfully."
@@ -850,7 +778,7 @@ def send_email(pdf_path):
             return True
 
         print(
-            "    Email failed:"
+            "    Resend email error:"
         )
 
         print(
@@ -869,6 +797,37 @@ def send_email(pdf_path):
 
 
 # ============================================================
+# IMPORT YOUTUBE AGENT
+# ============================================================
+
+def collect_youtube_videos():
+
+    try:
+
+        from youtube_agent import (
+            get_trending_videos
+        )
+
+        return get_trending_videos()
+
+    except ImportError:
+
+        try:
+
+            from youtube_agent import (
+                get_videos
+            )
+
+            return get_videos()
+
+        except ImportError as exc:
+
+            raise RuntimeError(
+                "Could not import youtube_agent.py"
+            ) from exc
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -881,113 +840,29 @@ def main():
     )
     print("=" * 72)
 
-    # --------------------------------------------------------
-    # Import YouTube agent
-    # --------------------------------------------------------
-
-    try:
-
-        from youtube_agent import get_trending_videos
-
-    except ImportError:
-
-        try:
-
-            from youtube_agent import get_videos
-
-            get_trending_videos = get_videos
-
-        except ImportError as exc:
-
-            print()
-            print(
-                "ERROR: Could not import youtube_agent."
-            )
-
-            print(exc)
-
-            sys.exit(1)
-
-    # --------------------------------------------------------
-    # Collect videos
-    # --------------------------------------------------------
-
     print()
-    print("[1/5] Connecting to YouTube...")
+    print(
+        "[1/5] Connecting to YouTube..."
+    )
 
     print()
     print(
-        "[2/5] Collecting India + worldwide-proxy trends..."
+        "[2/5] Collecting India + "
+        "worldwide-proxy trends..."
     )
 
-    try:
-
-        videos = get_trending_videos()
-
-    except TypeError:
-
-        # Compatibility with older youtube_agent.py
-        videos = []
-
-        try:
-
-            india = get_trending_videos(
-                keyword="India",
-                limit=50,
-            )
-
-            if india:
-                videos.extend(india)
-
-        except Exception as exc:
-
-            print(
-                f"    India collection warning: {exc}"
-            )
-
-        try:
-
-            worldwide = get_trending_videos(
-                keyword="worldwide",
-                limit=50,
-            )
-
-            if worldwide:
-                videos.extend(worldwide)
-
-        except Exception as exc:
-
-            print(
-                f"    Worldwide collection warning: {exc}"
-            )
+    videos = collect_youtube_videos()
 
     if not videos:
 
         raise RuntimeError(
-            "No YouTube videos were collected."
+            "YouTube returned zero videos."
         )
 
-    # --------------------------------------------------------
-    # Print counts
-    # --------------------------------------------------------
-
-    india_count = min(
-        49,
-        len(videos)
-    )
-
-    worldwide_count = max(
-        0,
-        len(videos) - india_count
-    )
-
     print(
-        f"    Total videos: {len(videos)}"
+        f"    Total videos collected: "
+        f"{len(videos)}"
     )
-
-    # --------------------------------------------------------
-    # Generate
-    # --------------------------------------------------------
 
     print()
     print(
@@ -996,29 +871,21 @@ def main():
 
     ideas = generate_ideas(
         videos,
-        number_of_ideas=24,
+        number_of_ideas=24
     )
 
     print(
-        f"    Generated {len(ideas)} ideas."
+        f"    Generated {len(ideas)} concepts."
     )
-
-    # --------------------------------------------------------
-    # JSON
-    # --------------------------------------------------------
 
     print()
     print(
-        "[4/5] Saving JSON + PDF..."
+        "[4/5] Creating report..."
     )
 
     json_file = save_json(ideas)
 
     pdf_file = create_pdf(ideas)
-
-    # --------------------------------------------------------
-    # Email
-    # --------------------------------------------------------
 
     print()
     print(
@@ -1034,9 +901,8 @@ def main():
     print("SUCCESS")
     print("=" * 72)
 
-    print()
     print(
-        f"Ideas generated: {len(ideas)}"
+        f"Ideas: {len(ideas)}"
     )
 
     print(
@@ -1053,5 +919,28 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+
+    try:
+
+        main()
+
+    except KeyboardInterrupt:
+
+        print(
+            "\nProcess cancelled."
+        )
+
+        sys.exit(1)
+
+    except Exception as exc:
+
+        print()
+        print("=" * 72)
+        print("ERROR")
+        print("=" * 72)
+        print()
+        print(str(exc))
+        print()
+
+        sys.exit(1)
 ````

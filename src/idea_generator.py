@@ -1,49 +1,184 @@
-````python
 import os
 import sys
 import json
-import time
-import re
 from pathlib import Path
+from datetime import datetime
 
-import requests
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
 
-
-# ============================================================
-# SETUP
-# ============================================================
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-REPORTS_DIR = ROOT_DIR / "reports"
-
-REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-
-load_dotenv(ROOT_DIR / ".env")
+try:
+    import requests
+except ImportError:
+    requests = None
 
 
 # ============================================================
-# ENVIRONMENT
+# CONFIGURATION
 # ============================================================
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = BASE_DIR / ".env"
+
+if load_dotenv:
+    load_dotenv(ENV_FILE)
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
 
 OPENROUTER_MODEL = os.getenv(
     "OPENROUTER_MODEL",
-    "openai/gpt-4.1-mini"
+    "google/gemini-2.0-flash-001"
 ).strip()
 
+OUTPUT_DIR = BASE_DIR / "summaries"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-if not OPENROUTER_API_KEY:
-    print("ERROR: OPENROUTER_API_KEY is missing.")
-    sys.exit(1)
+
+# ============================================================
+# YOUTUBE
+# ============================================================
+
+def get_youtube_videos():
+    """
+    Get recent YouTube videos using YouTube Data API.
+    If the API key is missing or the request fails,
+    return an empty list instead of crashing.
+    """
+
+    if not YOUTUBE_API_KEY:
+        print("WARNING: YOUTUBE_API_KEY not found.")
+        return []
+
+    if requests is None:
+        print("ERROR: requests package is not installed.")
+        return []
+
+    url = "https://www.googleapis.com/youtube/v3/search"
+
+    params = {
+        "part": "snippet",
+        "q": "India entertainment comedy thriller",
+        "type": "video",
+        "order": "date",
+        "maxResults": 10,
+        "key": YOUTUBE_API_KEY,
+    }
+
+    try:
+        response = requests.get(
+            url,
+            params=params,
+            timeout=30
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        videos = []
+
+        for item in data.get("items", []):
+            snippet = item.get("snippet", {})
+            video_id = item.get("id", {}).get("videoId")
+
+            if not video_id:
+                continue
+
+            videos.append({
+                "title": snippet.get("title", ""),
+                "description": snippet.get("description", ""),
+                "channel": snippet.get("channelTitle", ""),
+                "published_at": snippet.get("publishedAt", ""),
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+            })
+
+        return videos
+
+    except Exception as exc:
+        print(f"WARNING: YouTube collection failed: {exc}")
+        return []
 
 
 # ============================================================
 # OPENROUTER
 # ============================================================
 
-def ask_ai(prompt):
+def generate_ai_ideas(videos):
+    """
+    Generate YouTube content ideas using OpenRouter.
+    """
+
+    if not OPENROUTER_API_KEY:
+        print("WARNING: OPENROUTER_API_KEY not found.")
+        return generate_fallback_ideas(videos)
+
+    if requests is None:
+        print("ERROR: requests package is not installed.")
+        return generate_fallback_ideas(videos)
+
+    video_text = ""
+
+    for index, video in enumerate(videos, start=1):
+        video_text += (
+            f"\n{index}. {video['title']}\n"
+            f"Channel: {video['channel']}\n"
+            f"Description: {video['description'][:500]}\n"
+        )
+
+    if not video_text:
+        video_text = "No YouTube trend data was available."
+
+    prompt = f"""
+You are a YouTube entertainment trend analyst.
+
+Create original YouTube video ideas for an Indian audience.
+
+Focus on:
+- Thriller
+- Mystery
+- Suspense
+- Comedy
+- Relatable everyday situations
+- Telugu audience
+- Solo-shoot friendly concepts
+- YouTube Shorts and 8-10 minute videos
+
+Do NOT copy existing videos.
+Do NOT create silly or childish ideas.
+
+For every idea provide:
+
+1. Title
+2. English meaning
+3. Story log
+4. Hook
+5. Twist
+6. Comedy element
+7. Recommended format
+
+Recent YouTube data:
+
+{video_text}
+
+Return valid JSON only in this format:
+
+{{
+  "ideas": [
+    {{
+      "title": "...",
+      "english_meaning": "...",
+      "story_log": "...",
+      "hook": "...",
+      "twist": "...",
+      "comedy": "...",
+      "format": "Short / 8-10 minute"
+    }}
+  ]
+}}
+"""
 
     url = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -58,579 +193,211 @@ def ask_ai(prompt):
         "model": OPENROUTER_MODEL,
         "messages": [
             {
-                "role": "system",
-                "content": (
-                    "You are an expert YouTube entertainment "
-                    "idea generator. Create original, realistic, "
-                    "high-retention concepts."
-                ),
-            },
-            {
                 "role": "user",
                 "content": prompt,
-            },
+            }
         ],
         "temperature": 0.8,
-        "max_tokens": 10000,
+        "max_tokens": 4000,
     }
 
-    for attempt in range(1, 5):
-
-        print(
-            f"    AI request attempt {attempt}/4..."
+    try:
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=120
         )
 
-        try:
+        response.raise_for_status()
 
-            response = requests.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=120,
-            )
+        data = response.json()
 
-            if response.status_code == 200:
+        choices = data.get("choices", [])
 
-                data = response.json()
+        if not choices:
+            print("WARNING: OpenRouter returned no choices.")
+            return generate_fallback_ideas(videos)
 
-                choices = data.get("choices", [])
+        content = choices[0].get("message", {}).get("content", "")
 
-                if not choices:
+        if not content:
+            print("WARNING: OpenRouter returned empty content.")
+            return generate_fallback_ideas(videos)
 
-                    raise RuntimeError(
-                        "OpenRouter returned no choices."
-                    )
+        return parse_ai_response(content)
 
-                message = choices[0].get(
-                    "message",
-                    {}
-                )
-
-                content = message.get(
-                    "content",
-                    ""
-                )
-
-                if not content:
-
-                    raise RuntimeError(
-                        "OpenRouter returned empty content."
-                    )
-
-                print("    AI response received.")
-
-                return content
-
-            if response.status_code in (
-                429,
-                500,
-                502,
-                503,
-                504,
-            ):
-
-                print(
-                    f"    Temporary API error: "
-                    f"{response.status_code}"
-                )
-
-                time.sleep(
-                    min(attempt * 5, 20)
-                )
-
-                continue
-
-            raise RuntimeError(
-                "OpenRouter error "
-                f"{response.status_code}: "
-                f"{response.text[:1000]}"
-            )
-
-        except requests.RequestException as error:
-
-            print(
-                f"    Network error: {error}"
-            )
-
-            time.sleep(
-                min(attempt * 5, 20)
-            )
-
-    raise RuntimeError(
-        "OpenRouter failed after 4 attempts."
-    )
+    except Exception as exc:
+        print(f"WARNING: OpenRouter failed: {exc}")
+        return generate_fallback_ideas(videos)
 
 
 # ============================================================
-# JSON EXTRACTION
+# PARSE AI RESPONSE
 # ============================================================
 
-def parse_json(text):
+def parse_ai_response(content):
+    """
+    Safely parse JSON returned by the AI.
+    """
 
-    text = text.strip()
+    content = content.strip()
 
-    # Remove Markdown fences if AI adds them
-    text = re.sub(
-        r"^```json\s*",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    )
+    # Remove accidental Markdown fences if AI returns them.
+    if content.startswith("```"):
+        lines = content.splitlines()
 
-    text = re.sub(
-        r"^```\s*",
-        "",
-        text,
-    )
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
 
-    text = re.sub(
-        r"\s*```$",
-        "",
-        text,
-    )
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
 
-    text = text.strip()
+        content = "\n".join(lines).strip()
 
     try:
+        data = json.loads(content)
 
-        return json.loads(text)
+        if isinstance(data, dict):
+            return data
+
+        return {"ideas": []}
 
     except json.JSONDecodeError:
-        pass
+        print("WARNING: AI response was not valid JSON.")
 
-    # Find JSON object
-    start = text.find("{")
-    end = text.rfind("}")
-
-    if start != -1 and end > start:
-
-        try:
-
-            return json.loads(
-                text[start:end + 1]
-            )
-
-        except json.JSONDecodeError:
-            pass
-
-    # Find JSON array
-    start = text.find("[")
-    end = text.rfind("]")
-
-    if start != -1 and end > start:
-
-        try:
-
-            return json.loads(
-                text[start:end + 1]
-            )
-
-        except json.JSONDecodeError:
-            pass
-
-    raise RuntimeError(
-        "Could not parse AI response as JSON."
-    )
+        return {
+            "ideas": [
+                {
+                    "title": "AI Response",
+                    "english_meaning": "Generated response",
+                    "story_log": content[:2000],
+                    "hook": "",
+                    "twist": "",
+                    "comedy": "",
+                    "format": "8-10 minute",
+                }
+            ]
+        }
 
 
 # ============================================================
-# YOUTUBE DATA
+# FALLBACK IDEAS
 # ============================================================
 
-def get_youtube_data():
-
-    try:
-
-        from youtube_agent import (
-            get_trending_videos
-        )
-
-        videos = get_trending_videos()
-
-        return videos
-
-    except ImportError:
-
-        pass
-
-    try:
-
-        from youtube_agent import get_videos
-
-        return get_videos()
-
-    except ImportError as error:
-
-        raise RuntimeError(
-            "Cannot import youtube_agent.py. "
-            "Check that src/youtube_agent.py exists."
-        ) from error
-
-
-# ============================================================
-# TREND TEXT
-# ============================================================
-
-def make_trend_text(videos):
-
-    lines = []
-
-    for number, video in enumerate(
-        videos,
-        start=1
-    ):
-
-        if not isinstance(video, dict):
-
-            title = str(video)
-
-            lines.append(
-                f"{number}. {title}"
-            )
-
-            continue
-
-        title = video.get(
-            "title",
-            ""
-        )
-
-        channel = video.get(
-            "channel",
-            video.get(
-                "channel_title",
-                ""
-            )
-        )
-
-        views = video.get(
-            "views",
-            video.get(
-                "view_count",
-                0
-            )
-        )
-
-        url = video.get(
-            "url",
-            video.get(
-                "video_url",
-                ""
-            )
-        )
-
-        lines.append(
-            f"{number}. {title}\n"
-            f"Channel: {channel}\n"
-            f"Views: {views}\n"
-            f"URL: {url}"
-        )
-
-    return "\n\n".join(lines)
-
-
-# ============================================================
-# GENERATE IDEAS
-# ============================================================
-
-def generate_ideas(videos):
-
-    trend_text = make_trend_text(videos)
-
-    prompt = f"""
-Generate exactly 24 original YouTube entertainment ideas.
-
-Use the YouTube trends below only as inspiration.
-
-Do NOT copy any existing video.
-
-Target audience:
-Indian and Telugu viewers.
-
-Style:
-- mystery
-- suspense
-- thriller
-- comedy
-- relatable everyday situations
-- strong curiosity
-- realistic endings
-- simple production
-
-Every idea needs:
-
-title
-hook
-story_log
-investigation
-clues
-wrong_theory
-escalation
-reveal
-comedy_payoff
-short_version
-long_version
-
-The final reveal must logically explain the mystery.
-
-Avoid:
-
-- random ghosts
-- random dreams
-- random coincidences
-- meaningless prank endings
-- childish comedy
-- copied movies
-- copied YouTube videos
-- impossible technology
-
-Prefer locations such as:
-
-terrace
-apartment
-room
-lobby
-stairs
-street
-shop
-office
-parking area
-
-Return ONLY JSON.
-
-Required format:
-
-{{
-  "ideas": [
-    {{
-      "id": 1,
-      "title": "Title",
-      "hook": "Hook",
-      "story_log": "Complete story",
-      "investigation": "Investigation",
-      "clues": [
-        "Clue 1",
-        "Clue 2"
-      ],
-      "wrong_theory": "Wrong theory",
-      "escalation": "Escalation",
-      "reveal": "Logical reveal",
-      "comedy_payoff": "Comedy ending",
-      "short_version": "Shorts version",
-      "long_version": "8-10 minute version"
-    }}
-  ]
-}}
-
-TREND DATA:
-
-{trend_text}
-"""
-
-    response = ask_ai(prompt)
-
-    data = parse_json(response)
-
-    if isinstance(data, dict):
-
-        ideas = data.get(
-            "ideas",
-            []
-        )
-
-    elif isinstance(data, list):
-
-        ideas = data
-
-    else:
-
-        raise RuntimeError(
-            "Invalid AI response format."
-        )
-
-    if not ideas:
-
-        raise RuntimeError(
-            "AI generated zero ideas."
-        )
-
-    return ideas
-
-
-# ============================================================
-# SAVE JSON
-# ============================================================
-
-def save_json(ideas):
-
-    path = REPORTS_DIR / "ideas.json"
-
-    with open(
-        path,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
+def generate_fallback_ideas(videos):
+    """
+    Creates ideas even when YouTube/OpenRouter is unavailable.
+    """
+
+    return {
+        "ideas": [
             {
-                "model": OPENROUTER_MODEL,
-                "count": len(ideas),
-                "ideas": ideas,
+                "title": "Nenu Terrace Meeda Oka Small Mistake Chesanu... Kani",
+                "english_meaning": "I made a small mistake on the terrace... but",
+                "story_log": (
+                    "Terrace meeda oka small mistake jarugutundi. "
+                    "Adi cover cheyyadaniki try chestunte, "
+                    "akkada already evaro observe chestunnaru ani "
+                    "hero ki doubt vastundi. Finally, mystery "
+                    "antha oka innocent misunderstanding ani reveal avutundi."
+                ),
+                "hook": "Why is someone watching me?",
+                "twist": "The mysterious clue was caused by an innocent mistake.",
+                "comedy": "Hero overthinks every small clue.",
+                "format": "8-10 minute",
             },
+            {
+                "title": "Nenu Phone Akkada Petti Vachesa... Kani Phone Malli",
+                "english_meaning": "I left my phone there... but the phone came back",
+                "story_log": (
+                    "Hero phone ni terrace lo oka place lo petti "
+                    "konchem distance velthadu. Tirigi vachaka phone "
+                    "different place lo kanipistundi. Suspense perigina "
+                    "tarvata actual reason simple ga reveal avutundi."
+                ),
+                "hook": "Who moved my phone?",
+                "twist": "The phone was moved accidentally while cleaning.",
+                "comedy": "Hero imagines an elaborate mystery.",
+                "format": "Short",
+            },
+            {
+                "title": "Nenu Oka Sound Ignore Chesanu... Tarvata",
+                "english_meaning": "I ignored one strange sound... then",
+                "story_log": (
+                    "Morning terrace lo repeated sound vinipistundi. "
+                    "Hero first ignore chestadu. Sound repeat avvadamto "
+                    "investigate chestadu. Finally, terrifying clue "
+                    "anipinchindhi actually normal household object "
+                    "valla vachina sound ani telustundi."
+                ),
+                "hook": "What is making that sound?",
+                "twist": "The scary sound has a completely ordinary explanation.",
+                "comedy": "Hero's investigation becomes unnecessarily serious.",
+                "format": "8-10 minute",
+            },
+        ]
+    }
+
+
+# ============================================================
+# SAVE RESULTS
+# ============================================================
+
+def save_results(data):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    json_file = OUTPUT_DIR / f"youtube_ideas_{timestamp}.json"
+    txt_file = OUTPUT_DIR / f"youtube_ideas_{timestamp}.txt"
+
+    with open(json_file, "w", encoding="utf-8") as file:
+        json.dump(
+            data,
             file,
             indent=2,
-            ensure_ascii=False,
+            ensure_ascii=False
         )
 
-    print(
-        f"    JSON saved: {path}"
-    )
+    with open(txt_file, "w", encoding="utf-8") as file:
+        file.write("=" * 70 + "\n")
+        file.write("YOUTUBE HIGH-ENGAGEMENT IDEA GENERATOR\n")
+        file.write("=" * 70 + "\n\n")
 
+        ideas = data.get("ideas", [])
 
-# ============================================================
-# PDF
-# ============================================================
+        for index, idea in enumerate(ideas, start=1):
+            file.write(f"IDEA {index}\n")
+            file.write("-" * 70 + "\n")
 
-def save_pdf(ideas):
-
-    try:
-
-        from reportlab.lib.pagesizes import A4
-        from reportlab.platypus import (
-            SimpleDocTemplate,
-            Paragraph,
-            Spacer,
-            PageBreak,
-        )
-        from reportlab.lib.styles import (
-            getSampleStyleSheet
-        )
-
-    except ImportError:
-
-        print(
-            "WARNING: reportlab is not installed."
-        )
-
-        return
-
-    path = (
-        REPORTS_DIR /
-        "youtube_high_engagement_ideas.pdf"
-    )
-
-    styles = getSampleStyleSheet()
-
-    document = SimpleDocTemplate(
-        str(path),
-        pagesize=A4,
-        rightMargin=40,
-        leftMargin=40,
-        topMargin=40,
-        bottomMargin=40,
-    )
-
-    story = []
-
-    story.append(
-        Paragraph(
-            "YOUTUBE HIGH-ENGAGEMENT IDEAS",
-            styles["Title"]
-        )
-    )
-
-    story.append(
-        Spacer(1, 20)
-    )
-
-    for index, idea in enumerate(
-        ideas,
-        start=1
-    ):
-
-        title = str(
-            idea.get(
-                "title",
-                "Untitled"
+            file.write(f"Title: {idea.get('title', '')}\n")
+            file.write(
+                f"English Meaning: "
+                f"{idea.get('english_meaning', '')}\n"
             )
-        )
-
-        story.append(
-            Paragraph(
-                f"{index}. {title}",
-                styles["Heading2"]
+            file.write(
+                f"Story Log: "
+                f"{idea.get('story_log', '')}\n"
             )
-        )
-
-        fields = [
-            ("HOOK", "hook"),
-            ("STORY LOG", "story_log"),
-            ("INVESTIGATION", "investigation"),
-            ("WRONG THEORY", "wrong_theory"),
-            ("ESCALATION", "escalation"),
-            ("REVEAL", "reveal"),
-            ("COMEDY PAYOFF", "comedy_payoff"),
-            ("SHORT VERSION", "short_version"),
-            ("8-10 MIN VERSION", "long_version"),
-        ]
-
-        for label, key in fields:
-
-            value = str(
-                idea.get(
-                    key,
-                    ""
-                )
+            file.write(
+                f"Hook: "
+                f"{idea.get('hook', '')}\n"
+            )
+            file.write(
+                f"Twist: "
+                f"{idea.get('twist', '')}\n"
+            )
+            file.write(
+                f"Comedy: "
+                f"{idea.get('comedy', '')}\n"
+            )
+            file.write(
+                f"Format: "
+                f"{idea.get('format', '')}\n"
             )
 
-            value = (
-                value
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-            )
+            file.write("\n")
 
-            story.append(
-                Paragraph(
-                    f"<b>{label}</b><br>{value}",
-                    styles["BodyText"]
-                )
-            )
-
-            story.append(
-                Spacer(1, 8)
-            )
-
-        clues = idea.get(
-            "clues",
-            []
-        )
-
-        if isinstance(clues, list):
-
-            clue_text = "<br>".join(
-                f"• {str(clue)}"
-                for clue in clues
-            )
-
-            story.append(
-                Paragraph(
-                    f"<b>CLUES</b><br>{clue_text}",
-                    styles["BodyText"]
-                )
-            )
-
-        if index < len(ideas):
-
-            story.append(
-                PageBreak()
-            )
-
-    document.build(story)
-
-    print(
-        f"    PDF saved: {path}"
-    )
+    return json_file, txt_file
 
 
 # ============================================================
@@ -638,83 +405,49 @@ def save_pdf(ideas):
 # ============================================================
 
 def main():
+    print("=" * 70)
+    print("YOUTUBE HIGH-ENGAGEMENT IDEA GENERATOR")
+    print("=" * 70)
 
-    print()
-    print("=" * 72)
-    print(
-        "YOUTUBE HIGH-ENGAGEMENT IDEA GENERATOR"
-    )
-    print("=" * 72)
-
-    print()
-    print(
-        "[1/5] Connecting to YouTube..."
-    )
-
-    print()
-    print(
-        "[2/5] Collecting India + "
-        "worldwide-proxy trends..."
-    )
-
-    videos = get_youtube_data()
-
-    if not videos:
-
-        raise RuntimeError(
-            "No YouTube videos were collected."
-        )
+    print("\n[1/5] Checking configuration...")
 
     print(
-        f"    Videos collected: {len(videos)}"
+        "OpenRouter:",
+        "Configured" if OPENROUTER_API_KEY else "Not configured"
     )
-
-    print()
-    print(
-        "[3/5] Generating 24 candidate concepts..."
-    )
-
-    ideas = generate_ideas(videos)
 
     print(
-        f"    Generated {len(ideas)} ideas."
+        "YouTube:",
+        "Configured" if YOUTUBE_API_KEY else "Not configured"
     )
 
-    print()
+    print("\n[2/5] Collecting YouTube trends...")
+
+    videos = get_youtube_videos()
+
+    print(f"Collected {len(videos)} videos.")
+
+    print("\n[3/5] Generating content ideas...")
+
+    ideas = generate_ai_ideas(videos)
+
     print(
-        "[4/5] Creating files..."
+        f"Generated {len(ideas.get('ideas', []))} ideas."
     )
 
-    save_json(ideas)
+    print("\n[4/5] Saving results...")
 
-    save_pdf(ideas)
+    json_file, txt_file = save_results(ideas)
 
-    print()
-    print(
-        "[5/5] Complete."
-    )
+    print(f"JSON: {json_file}")
+    print(f"TXT : {txt_file}")
 
-    print()
-    print("=" * 72)
-    print("SUCCESS")
-    print("=" * 72)
+    print("\n[5/5] Complete.")
+
+    print("\n" + "=" * 70)
+    print("GENERATION COMPLETED SUCCESSFULLY")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
-
-    try:
-
-        main()
-
-    except Exception as error:
-
-        print()
-        print("=" * 72)
-        print("ERROR")
-        print("=" * 72)
-        print()
-        print(str(error))
-        print()
-
-        sys.exit(1)
-````
+    main()

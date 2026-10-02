@@ -378,28 +378,97 @@ Return ONLY valid JSON.
 """
 
 
-def gemini_json(client, prompt, temperature=0.9, max_output_tokens=30000):
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=temperature,
-            top_p=0.95,
-            top_k=40,
-            max_output_tokens=max_output_tokens,
-        ),
-    )
-
-    if not response.text:
+def extract_json_value(raw_text):
+    """Safely parse Gemini JSON and accept either an object or a list."""
+    if not raw_text:
         raise RuntimeError("Gemini returned an empty response.")
 
-    text = response.text.strip()
+    text = raw_text.strip()
 
     if text.startswith("```"):
         text = text.replace("```json", "").replace("```", "").strip()
 
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as first_error:
+        # Gemini sometimes adds a small amount of text around valid JSON.
+        decoder = json.JSONDecoder()
+        for i, char in enumerate(text):
+            if char not in "[{":
+                continue
+            try:
+                value, _ = decoder.raw_decode(text[i:])
+                return value
+            except json.JSONDecodeError:
+                continue
+        raise RuntimeError(
+            "Gemini returned invalid/incomplete JSON: "
+            f"{first_error}"
+        ) from first_error
+
+
+def gemini_json(client, prompt, temperature=0.9, max_output_tokens=30000):
+    last_error = None
+
+    for attempt in range(1, 4):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=temperature,
+                    top_p=0.95,
+                    top_k=40,
+                    max_output_tokens=max_output_tokens,
+                ),
+            )
+
+            result = extract_json_value(response.text)
+
+            # IMPORTANT: Gemini may legally return a JSON array even when
+            # the prompt asks for a top-level object. Do not call .get()
+            # on it; return it to the caller for shape normalization.
+            return result
+
+        except Exception as exc:
+            last_error = exc
+            print(f"    Gemini request {attempt}/3 failed: {exc}")
+
+            if attempt < 3:
+                prompt += """
+
+IMPORTANT RETRY INSTRUCTION:
+Return ONLY complete valid JSON.
+The top-level response may be either the requested JSON object or array,
+but it must be complete. Do not add markdown or explanations.
+Keep descriptions concise so the response finishes before the token limit.
+"""
+                max_output_tokens = min(max_output_tokens, 18000)
+
+    raise RuntimeError(f"Gemini failed after 3 attempts: {last_error}")
+
+
+def get_idea_list(result, preferred_keys):
+    """Normalize Gemini's object/array output into a Python list of ideas."""
+    if isinstance(result, list):
+        return result
+
+    if isinstance(result, dict):
+        for key in preferred_keys:
+            value = result.get(key)
+            if isinstance(value, list):
+                return value
+
+        # Also handle one nested object level, e.g. {"result": {"ideas": [...]}}.
+        for value in result.values():
+            if isinstance(value, dict):
+                for key in preferred_keys:
+                    nested = value.get(key)
+                    if isinstance(nested, list):
+                        return nested
+
+    return []
 
 
 # ============================================================
@@ -498,7 +567,7 @@ def quality_gate(client, candidates):
         max_output_tokens=30000,
     )
 
-    ideas = result.get("approved_ideas", [])
+    ideas = get_idea_list(result, ["approved_ideas", "ideas", "final_ideas"])
 
     if len(ideas) < 8:
         raise RuntimeError(
@@ -534,12 +603,10 @@ def build_final_report(
         max_output_tokens=30000,
     )
 
-    candidates = candidates_result.get("ideas", [])
-
-    if not candidates:
-        # Accept alternative key if Gemini returns a different
-        # top-level name despite the schema instructions.
-        candidates = candidates_result.get("approved_ideas", [])
+    candidates = get_idea_list(
+        candidates_result,
+        ["ideas", "candidate_ideas", "approved_ideas", "final_ideas"],
+    )
 
     if not candidates:
         raise RuntimeError("Gemini returned no candidate ideas.")

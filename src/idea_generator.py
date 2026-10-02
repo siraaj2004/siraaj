@@ -154,170 +154,282 @@ def enrich_videos_with_categories(youtube, videos):
 
 
 def build_trend_summary(videos):
-    """Build a trend summary safely even if an API response contains
-    unexpected list/non-dict records."""
-    safe_videos = [v for v in (videos or []) if isinstance(v, dict)]
-
     categories = Counter(
-        str(v.get("category", "Unknown"))
-        for v in safe_videos
+        v.get("category", "Unknown") for v in videos
     )
 
     top_videos = sorted(
-        safe_videos,
-        key=lambda x: int(x.get("views", 0) or 0),
+        videos,
+        key=lambda x: x.get("views", 0),
         reverse=True,
     )[:20]
 
     return {
-        "total_videos": len(safe_videos),
-        "total_views": sum(
-            int(v.get("views", 0) or 0) for v in safe_videos
-        ),
+        "total_videos": len(videos),
+        "total_views": sum(v.get("views", 0) for v in videos),
         "top_categories": categories.most_common(),
         "top_videos": top_videos,
     }
 
 
-def normalize_idea_list(value):
-    """Return only dictionary-shaped ideas."""
-    if not isinstance(value, list):
-        return []
+# ============================================================
+# STORY QUALITY RULES
+# ============================================================
 
-    cleaned = []
-    for item in value:
-        if isinstance(item, dict):
-            cleaned.append(item)
-        elif isinstance(item, list):
-            # Gemini occasionally nests an idea list one level deeper.
-            for nested in item:
-                if isinstance(nested, dict):
-                    cleaned.append(nested)
+QUALITY_RULES = """
+NON-NEGOTIABLE AUDIENCE RULES
 
-    return cleaned
+The viewer must feel:
+1. "Wait... what?"
+2. "How is that possible?"
+3. "I need to know what is actually happening."
+4. "There is another explanation."
+5. "Ohhh... THAT is what happened!"
+6. "That was clever/funny."
+
+Do NOT create an idea just because something moves, disappears,
+falls, makes a sound, knocks, turns off, or changes position.
+
+A strange event is NOT a story.
+
+Every good idea needs:
+NORMAL LIFE -> SPECIFIC ANOMALY -> MYSTERY QUESTION ->
+INVESTIGATION -> NEW CLUE -> WRONG THEORY ->
+ESCALATION -> RECONTEXTUALIZATION -> LOGICAL REVEAL -> PAYOFF.
+
+The reveal must explain the earlier clues.
+The reveal must NOT be:
+- "it was a cat" with no setup
+- "it was wind" with no setup
+- "I imagined everything"
+- "someone was secretly there" without evidence
+- a random prank
+- a dream
+- supernatural magic unless explicitly requested
+- coincidence used as the entire explanation.
+
+The protagonist must have a reason to investigate.
+The mystery must get harder before it gets easier.
+At least 2 earlier details should become meaningful after the reveal.
+
+The audience should be able to form a theory before the reveal,
+but not be able to confidently solve everything in the first 30 seconds.
+
+Avoid:
+- generic phone missing stories
+- generic chair moved stories
+- generic knocking stories
+- generic shadow stories
+- generic "someone is watching me"
+- generic CCTV reveals
+- generic fake ghost stories
+- generic robbery stories
+- random object movement
+- repetitive "I heard a sound" plots.
+
+The concept should feel like a real YouTube video someone would
+click immediately, not a writing exercise.
+"""
 
 
-def get_idea_list(result, preferred_keys):
-    """Normalize Gemini object/array/nested output into a list of dict ideas."""
-    if isinstance(result, list):
-        return normalize_idea_list(result)
+def build_generation_prompt(india_videos, worldwide_videos, original_report):
+    india_summary = build_trend_summary(india_videos)
+    world_summary = build_trend_summary(worldwide_videos)
 
-    if not isinstance(result, dict):
-        return []
+    original = ""
+    if original_report.strip():
+        original = f"""
+============================================================
+PREVIOUS REPORT
+============================================================
+Use the previous report as reference. Do not erase useful
+information from it. Improve weak ideas rather than blindly
+repeating them.
 
-    # First check requested keys.
-    for key in preferred_keys:
-        value = result.get(key)
-        ideas = normalize_idea_list(value)
-        if ideas:
-            return ideas
+{original_report}
+============================================================
+END PREVIOUS REPORT
+============================================================
+"""
 
-    # Then inspect one nested dictionary level.
-    for value in result.values():
-        if isinstance(value, dict):
-            for key in preferred_keys:
-                ideas = normalize_idea_list(value.get(key))
-                if ideas:
-                    return ideas
+    return f"""
+You are a senior YouTube story developer, retention strategist,
+and thriller-comedy writer.
 
-    # Finally, if the object itself looks like a single idea, accept it.
-    if result.get("title") or result.get("logline"):
-        return [result]
+The creator wants ideas that make a normal viewer say:
 
-    return []
+"Wahh... what a concept!"
+"Wait, how did that happen?"
+"I want to know the ending."
+"That reveal actually makes sense."
+
+Do NOT optimize for quantity. Optimize for CONCEPT QUALITY.
+
+{QUALITY_RULES}
+
+CREATOR FORMAT
+- Telugu/Indian relatable
+- one main actor
+- preferably solo-shootable
+- simple real locations: terrace, room, apartment, lobby,
+  street, parking, shop-like home setup
+- natural light is preferred
+- no expensive VFX
+- 8-10 minute videos plus Shorts
+- thriller + mystery + comedy
+- comedy should come naturally from the reveal or protagonist's
+  overconfidence/overthinking
+- realistic enough that viewers can imagine it happening to them
+
+IMPORTANT:
+A title alone is not enough. Build a complete mini-mystery.
+
+For every long-form idea, answer internally:
+WHY DOES THE VIEWER CARE?
+WHAT EXACTLY IS STRANGE?
+WHAT DOES THE PROTAGONIST THINK?
+WHAT OTHER THEORY COULD THE VIEWER HAVE?
+WHAT CLUE CHANGES THE THEORY?
+WHY CAN'T HE WALK AWAY?
+WHAT DOES THE FINAL REVEAL EXPLAIN?
+WHY IS THE ENDING FUNNY OR SATISFYING?
+
+TREND DATA - INDIA
+{json.dumps(india_videos, ensure_ascii=False, indent=2)}
+
+INDIA SUMMARY
+{json.dumps(india_summary, ensure_ascii=False, indent=2)}
+
+TREND DATA - WORLDWIDE PROXY
+{json.dumps(worldwide_videos, ensure_ascii=False, indent=2)}
+
+WORLDWIDE SUMMARY
+{json.dumps(world_summary, ensure_ascii=False, indent=2)}
+
+{original}
+
+Generate 24 candidate concepts first.
+
+Candidate categories:
+- 6 trend-inspired thriller/comedy
+- 6 original thriller/comedy
+- 4 crime-comedy
+- 4 relatable mystery
+- 4 Shorts concepts
+
+Then internally eliminate weak candidates.
+
+DO NOT return the rejected candidates.
+
+Return exactly 12 final ideas:
+- 4 long-form trend-inspired
+- 4 long-form original
+- 2 crime-comedy
+- 2 Shorts
+
+Each final idea must use this structure:
+
+{{
+  "title": "",
+  "genre": "",
+  "logline": "",
+  "hook": "",
+  "normal_start": "",
+  "strange_event": "",
+  "mystery_question": "",
+  "investigation": "",
+  "escalation": "",
+  "false_theory": "",
+  "clues": ["", "", ""],
+  "reveal": "",
+  "ending_payoff": "",
+  "content_summary": "",
+  "video_outline": ["", "", "", "", "", "", ""],
+  "target_audience": "",
+  "estimated_duration": "",
+  "shooting_difficulty": "",
+  "viral_potential": "",
+  "why_viewer_will_continue": "",
+  "why_this_is_not_silly": ""
+}}
+
+TITLE RULES:
+- curiosity first
+- natural Telugu-style English phrasing is allowed
+- do not make every title end with "chudandi"
+- avoid clickbait that promises something the story does not deliver
+
+LOGLINE RULE:
+One sentence that contains the protagonist, normal situation,
+strange problem, goal, and unanswered question.
+
+HOOK RULE:
+The first 10-20 seconds must contain a specific question or
+contradiction. Do not start with long exposition.
+
+REVEAL RULE:
+The reveal must be logical and planted earlier.
+The viewer should mentally replay the story after the reveal.
+
+FINAL RULE:
+Do not include generic filler just to complete the JSON.
+
+Return ONLY valid JSON.
+"""
 
 
-def extract_json_value(raw_text):
-    """Safely parse Gemini JSON and accept either an object or a list."""
-    if not raw_text:
+def gemini_json(client, prompt, temperature=0.9, max_output_tokens=30000):
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=temperature,
+            top_p=0.95,
+            top_k=40,
+            max_output_tokens=max_output_tokens,
+        ),
+    )
+
+    if not response.text:
         raise RuntimeError("Gemini returned an empty response.")
 
-    text = raw_text.strip()
+    text = response.text.strip()
 
     if text.startswith("```"):
         text = text.replace("```json", "").replace("```", "").strip()
 
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as first_error:
-        # Gemini sometimes adds a small amount of text around valid JSON.
-        decoder = json.JSONDecoder()
-        for i, char in enumerate(text):
-            if char not in "[{":
-                continue
-            try:
-                value, _ = decoder.raw_decode(text[i:])
-                return value
-            except json.JSONDecodeError:
-                continue
-        raise RuntimeError(
-            "Gemini returned invalid/incomplete JSON: "
-            f"{first_error}"
-        ) from first_error
+    parsed = json.loads(text)
+
+    # Gemini sometimes returns a raw JSON array instead of an object.
+    if isinstance(parsed, list):
+        parsed = {
+            "ideas": parsed,
+            "approved_ideas": parsed,
+            "items": parsed,
+        }
+    elif not isinstance(parsed, dict):
+        raise TypeError(
+            f"Gemini returned unexpected JSON type: {type(parsed).__name__}"
+        )
+
+    return parsed
 
 
-def gemini_json(client, prompt, temperature=0.9, max_output_tokens=30000):
-    last_error = None
-
-    for attempt in range(1, 4):
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=temperature,
-                    top_p=0.95,
-                    top_k=40,
-                    max_output_tokens=max_output_tokens,
-                ),
-            )
-
-            result = extract_json_value(response.text)
-
-            # IMPORTANT: Gemini may legally return a JSON array even when
-            # the prompt asks for a top-level object. Do not call .get()
-            # on it; return it to the caller for shape normalization.
-            return result
-
-        except Exception as exc:
-            last_error = exc
-            print(f"    Gemini request {attempt}/3 failed: {exc}")
-
-            if attempt < 3:
-                prompt += """
-
-IMPORTANT RETRY INSTRUCTION:
-Return ONLY complete valid JSON.
-The top-level response may be either the requested JSON object or array,
-but it must be complete. Do not add markdown or explanations.
-Keep descriptions concise so the response finishes before the token limit.
-"""
-                max_output_tokens = min(max_output_tokens, 18000)
-
-    raise RuntimeError(f"Gemini failed after 3 attempts: {last_error}")
-
-
-def get_idea_list(result, preferred_keys):
-    """Normalize Gemini's object/array output into a Python list of ideas."""
-    if isinstance(result, list):
-        return result
-
-    if isinstance(result, dict):
-        for key in preferred_keys:
-            value = result.get(key)
-            if isinstance(value, list):
-                return value
-
-        # Also handle one nested object level, e.g. {"result": {"ideas": [...]}}.
-        for value in result.values():
-            if isinstance(value, dict):
-                for key in preferred_keys:
-                    nested = value.get(key)
-                    if isinstance(nested, list):
-                        return nested
-
-    return []
+def as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, dict):
+        for key in ("ideas", "approved_ideas", "items", "data"):
+            nested = value.get(key)
+            if nested is not None:
+                return as_list(nested)
+        return [value]
+    return [value]
 
 
 # ============================================================
@@ -356,7 +468,7 @@ ORIGINALITY
 LOGIC
 RELATABILITY
 PAYOFF
-SOLO_SHOOT
+SOLO-SHOOT
 RETENTION
 
 REJECT any concept with:
@@ -408,11 +520,6 @@ CANDIDATES:
 
 
 def quality_gate(client, candidates):
-    candidates = normalize_idea_list(candidates)
-
-    if not candidates:
-        raise RuntimeError("No usable candidate dictionaries were received.")
-
     prompt = build_critic_prompt(candidates)
     result = gemini_json(
         client,
@@ -421,7 +528,11 @@ def quality_gate(client, candidates):
         max_output_tokens=30000,
     )
 
-    ideas = get_idea_list(result, ["approved_ideas", "ideas", "final_ideas"])
+    ideas = as_list(
+        result.get("approved_ideas")
+        or result.get("ideas")
+        or result.get("items")
+    )
 
     if len(ideas) < 8:
         raise RuntimeError(
@@ -457,34 +568,21 @@ def build_final_report(
         max_output_tokens=30000,
     )
 
-    candidates = get_idea_list(
-        candidates_result,
-        ["ideas", "candidate_ideas", "approved_ideas", "final_ideas"],
+    candidates = as_list(
+        candidates_result.get("ideas")
+        or candidates_result.get("approved_ideas")
+        or candidates_result.get("items")
     )
 
     if not candidates:
         raise RuntimeError("Gemini returned no candidate ideas.")
 
-    candidates = normalize_idea_list(candidates)
-
-    if not candidates:
-        raise RuntimeError(
-            "Gemini returned JSON, but it contained no dictionary-shaped candidate ideas."
-        )
-
-    # Keep the requested 24 maximum while tolerating fewer valid results.
-    candidates = candidates[:24]
-
     print(f"    Candidates received: {len(candidates)}")
     print("[4/5] Running strict audience/retention quality gate...")
 
     approved = quality_gate(client, candidates)
-    approved = normalize_idea_list(approved)
 
     print(f"    Strong ideas after filtering: {len(approved)}")
-
-    if not approved:
-        raise RuntimeError("Quality gate returned no usable dictionary ideas.")
 
     trend_based = approved[:4]
     original = approved[4:8]
@@ -802,9 +900,6 @@ def main():
     india = fetch_trending_videos(youtube, "IN", 50)
     worldwide = fetch_trending_videos(youtube, "US", 50)
 
-    india = [v for v in india if isinstance(v, dict)]
-    worldwide = [v for v in worldwide if isinstance(v, dict)]
-
     india = enrich_videos_with_categories(youtube, india)
     worldwide = enrich_videos_with_categories(youtube, worldwide)
 
@@ -856,8 +951,5 @@ if __name__ == "__main__":
         print("=" * 72)
         print("ERROR")
         print("=" * 72)
-        print(f"{type(e).__name__}: {e}")
-        print()
-        import traceback
-        traceback.print_exc()
+        print(e)
         sys.exit(1)

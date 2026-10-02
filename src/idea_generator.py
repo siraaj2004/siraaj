@@ -154,228 +154,77 @@ def enrich_videos_with_categories(youtube, videos):
 
 
 def build_trend_summary(videos):
+    """Build a trend summary safely even if an API response contains
+    unexpected list/non-dict records."""
+    safe_videos = [v for v in (videos or []) if isinstance(v, dict)]
+
     categories = Counter(
-        v.get("category", "Unknown") for v in videos
+        str(v.get("category", "Unknown"))
+        for v in safe_videos
     )
 
     top_videos = sorted(
-        videos,
-        key=lambda x: x.get("views", 0),
+        safe_videos,
+        key=lambda x: int(x.get("views", 0) or 0),
         reverse=True,
     )[:20]
 
     return {
-        "total_videos": len(videos),
-        "total_views": sum(v.get("views", 0) for v in videos),
+        "total_videos": len(safe_videos),
+        "total_views": sum(
+            int(v.get("views", 0) or 0) for v in safe_videos
+        ),
         "top_categories": categories.most_common(),
         "top_videos": top_videos,
     }
 
 
-# ============================================================
-# STORY QUALITY RULES
-# ============================================================
+def normalize_idea_list(value):
+    """Return only dictionary-shaped ideas."""
+    if not isinstance(value, list):
+        return []
 
-QUALITY_RULES = """
-NON-NEGOTIABLE AUDIENCE RULES
+    cleaned = []
+    for item in value:
+        if isinstance(item, dict):
+            cleaned.append(item)
+        elif isinstance(item, list):
+            # Gemini occasionally nests an idea list one level deeper.
+            for nested in item:
+                if isinstance(nested, dict):
+                    cleaned.append(nested)
 
-The viewer must feel:
-1. "Wait... what?"
-2. "How is that possible?"
-3. "I need to know what is actually happening."
-4. "There is another explanation."
-5. "Ohhh... THAT is what happened!"
-6. "That was clever/funny."
-
-Do NOT create an idea just because something moves, disappears,
-falls, makes a sound, knocks, turns off, or changes position.
-
-A strange event is NOT a story.
-
-Every good idea needs:
-NORMAL LIFE -> SPECIFIC ANOMALY -> MYSTERY QUESTION ->
-INVESTIGATION -> NEW CLUE -> WRONG THEORY ->
-ESCALATION -> RECONTEXTUALIZATION -> LOGICAL REVEAL -> PAYOFF.
-
-The reveal must explain the earlier clues.
-The reveal must NOT be:
-- "it was a cat" with no setup
-- "it was wind" with no setup
-- "I imagined everything"
-- "someone was secretly there" without evidence
-- a random prank
-- a dream
-- supernatural magic unless explicitly requested
-- coincidence used as the entire explanation.
-
-The protagonist must have a reason to investigate.
-The mystery must get harder before it gets easier.
-At least 2 earlier details should become meaningful after the reveal.
-
-The audience should be able to form a theory before the reveal,
-but not be able to confidently solve everything in the first 30 seconds.
-
-Avoid:
-- generic phone missing stories
-- generic chair moved stories
-- generic knocking stories
-- generic shadow stories
-- generic "someone is watching me"
-- generic CCTV reveals
-- generic fake ghost stories
-- generic robbery stories
-- random object movement
-- repetitive "I heard a sound" plots.
-
-The concept should feel like a real YouTube video someone would
-click immediately, not a writing exercise.
-"""
+    return cleaned
 
 
-def build_generation_prompt(india_videos, worldwide_videos, original_report):
-    india_summary = build_trend_summary(india_videos)
-    world_summary = build_trend_summary(worldwide_videos)
+def get_idea_list(result, preferred_keys):
+    """Normalize Gemini object/array/nested output into a list of dict ideas."""
+    if isinstance(result, list):
+        return normalize_idea_list(result)
 
-    original = ""
-    if original_report.strip():
-        original = f"""
-============================================================
-PREVIOUS REPORT
-============================================================
-Use the previous report as reference. Do not erase useful
-information from it. Improve weak ideas rather than blindly
-repeating them.
+    if not isinstance(result, dict):
+        return []
 
-{original_report}
-============================================================
-END PREVIOUS REPORT
-============================================================
-"""
+    # First check requested keys.
+    for key in preferred_keys:
+        value = result.get(key)
+        ideas = normalize_idea_list(value)
+        if ideas:
+            return ideas
 
-    return f"""
-You are a senior YouTube story developer, retention strategist,
-and thriller-comedy writer.
+    # Then inspect one nested dictionary level.
+    for value in result.values():
+        if isinstance(value, dict):
+            for key in preferred_keys:
+                ideas = normalize_idea_list(value.get(key))
+                if ideas:
+                    return ideas
 
-The creator wants ideas that make a normal viewer say:
+    # Finally, if the object itself looks like a single idea, accept it.
+    if result.get("title") or result.get("logline"):
+        return [result]
 
-"Wahh... what a concept!"
-"Wait, how did that happen?"
-"I want to know the ending."
-"That reveal actually makes sense."
-
-Do NOT optimize for quantity. Optimize for CONCEPT QUALITY.
-
-{QUALITY_RULES}
-
-CREATOR FORMAT
-- Telugu/Indian relatable
-- one main actor
-- preferably solo-shootable
-- simple real locations: terrace, room, apartment, lobby,
-  street, parking, shop-like home setup
-- natural light is preferred
-- no expensive VFX
-- 8-10 minute videos plus Shorts
-- thriller + mystery + comedy
-- comedy should come naturally from the reveal or protagonist's
-  overconfidence/overthinking
-- realistic enough that viewers can imagine it happening to them
-
-IMPORTANT:
-A title alone is not enough. Build a complete mini-mystery.
-
-For every long-form idea, answer internally:
-WHY DOES THE VIEWER CARE?
-WHAT EXACTLY IS STRANGE?
-WHAT DOES THE PROTAGONIST THINK?
-WHAT OTHER THEORY COULD THE VIEWER HAVE?
-WHAT CLUE CHANGES THE THEORY?
-WHY CAN'T HE WALK AWAY?
-WHAT DOES THE FINAL REVEAL EXPLAIN?
-WHY IS THE ENDING FUNNY OR SATISFYING?
-
-TREND DATA - INDIA
-{json.dumps(india_videos, ensure_ascii=False, indent=2)}
-
-INDIA SUMMARY
-{json.dumps(india_summary, ensure_ascii=False, indent=2)}
-
-TREND DATA - WORLDWIDE PROXY
-{json.dumps(worldwide_videos, ensure_ascii=False, indent=2)}
-
-WORLDWIDE SUMMARY
-{json.dumps(world_summary, ensure_ascii=False, indent=2)}
-
-{original}
-
-Generate 24 candidate concepts first.
-
-Candidate categories:
-- 6 trend-inspired thriller/comedy
-- 6 original thriller/comedy
-- 4 crime-comedy
-- 4 relatable mystery
-- 4 Shorts concepts
-
-Then internally eliminate weak candidates.
-
-DO NOT return the rejected candidates.
-
-Return exactly 12 final ideas:
-- 4 long-form trend-inspired
-- 4 long-form original
-- 2 crime-comedy
-- 2 Shorts
-
-Each final idea must use this structure:
-
-{{
-  "title": "",
-  "genre": "",
-  "logline": "",
-  "hook": "",
-  "normal_start": "",
-  "strange_event": "",
-  "mystery_question": "",
-  "investigation": "",
-  "escalation": "",
-  "false_theory": "",
-  "clues": ["", "", ""],
-  "reveal": "",
-  "ending_payoff": "",
-  "content_summary": "",
-  "video_outline": ["", "", "", "", "", "", ""],
-  "target_audience": "",
-  "estimated_duration": "",
-  "shooting_difficulty": "",
-  "viral_potential": "",
-  "why_viewer_will_continue": "",
-  "why_this_is_not_silly": ""
-}}
-
-TITLE RULES:
-- curiosity first
-- natural Telugu-style English phrasing is allowed
-- do not make every title end with "chudandi"
-- avoid clickbait that promises something the story does not deliver
-
-LOGLINE RULE:
-One sentence that contains the protagonist, normal situation,
-strange problem, goal, and unanswered question.
-
-HOOK RULE:
-The first 10-20 seconds must contain a specific question or
-contradiction. Do not start with long exposition.
-
-REVEAL RULE:
-The reveal must be logical and planted earlier.
-The viewer should mentally replay the story after the reveal.
-
-FINAL RULE:
-Do not include generic filler just to complete the JSON.
-
-Return ONLY valid JSON.
-"""
+    return []
 
 
 def extract_json_value(raw_text):
@@ -559,6 +408,11 @@ CANDIDATES:
 
 
 def quality_gate(client, candidates):
+    candidates = normalize_idea_list(candidates)
+
+    if not candidates:
+        raise RuntimeError("No usable candidate dictionaries were received.")
+
     prompt = build_critic_prompt(candidates)
     result = gemini_json(
         client,
@@ -611,12 +465,26 @@ def build_final_report(
     if not candidates:
         raise RuntimeError("Gemini returned no candidate ideas.")
 
+    candidates = normalize_idea_list(candidates)
+
+    if not candidates:
+        raise RuntimeError(
+            "Gemini returned JSON, but it contained no dictionary-shaped candidate ideas."
+        )
+
+    # Keep the requested 24 maximum while tolerating fewer valid results.
+    candidates = candidates[:24]
+
     print(f"    Candidates received: {len(candidates)}")
     print("[4/5] Running strict audience/retention quality gate...")
 
     approved = quality_gate(client, candidates)
+    approved = normalize_idea_list(approved)
 
     print(f"    Strong ideas after filtering: {len(approved)}")
+
+    if not approved:
+        raise RuntimeError("Quality gate returned no usable dictionary ideas.")
 
     trend_based = approved[:4]
     original = approved[4:8]
@@ -934,6 +802,9 @@ def main():
     india = fetch_trending_videos(youtube, "IN", 50)
     worldwide = fetch_trending_videos(youtube, "US", 50)
 
+    india = [v for v in india if isinstance(v, dict)]
+    worldwide = [v for v in worldwide if isinstance(v, dict)]
+
     india = enrich_videos_with_categories(youtube, india)
     worldwide = enrich_videos_with_categories(youtube, worldwide)
 
@@ -985,5 +856,8 @@ if __name__ == "__main__":
         print("=" * 72)
         print("ERROR")
         print("=" * 72)
-        print(e)
+        print(f"{type(e).__name__}: {e}")
+        print()
+        import traceback
+        traceback.print_exc()
         sys.exit(1)

@@ -26,6 +26,7 @@ from reportlab.platypus import (
     TableStyle,
     HRFlowable,
 )
+
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
 
@@ -59,12 +60,12 @@ JSON_FILE = (
 
 
 # ============================================================
-# LOAD ENV
+# START
 # ============================================================
 
 print()
 print("=" * 70)
-print("YOUTUBE TREND INTELLIGENCE GENERATOR")
+print("YOUTUBE TREND INTELLIGENCE + ENGAGING IDEA GENERATOR")
 print("=" * 70)
 print()
 
@@ -76,6 +77,11 @@ print()
 print("Looking for .env:")
 print(ENV_FILE)
 
+
+# ============================================================
+# LOAD ENV
+# ============================================================
+
 if not ENV_FILE.exists():
 
     print()
@@ -86,6 +92,7 @@ if not ENV_FILE.exists():
     print()
 
     sys.exit(1)
+
 
 load_dotenv(
     dotenv_path=ENV_FILE,
@@ -174,7 +181,7 @@ def validate_environment():
 
 
 # ============================================================
-# ORIGINAL REPORT
+# LOAD ORIGINAL REPORT
 # ============================================================
 
 def load_original_report():
@@ -439,7 +446,7 @@ def build_trend_summary(videos):
 
 
 # ============================================================
-# GEMINI PROMPT
+# ENGAGING IDEA GENERATION PROMPT
 # ============================================================
 
 def build_prompt(
@@ -463,107 +470,475 @@ def build_prompt(
         original_section = f"""
 
 ============================================================
-ORIGINAL REPORT
+PREVIOUS REPORT / MEMORY
 ============================================================
 
-IMPORTANT:
+Use this previous report for continuity and inspiration.
 
-Preserve 100% of the original information.
+DO NOT blindly repeat previous ideas.
 
-DO NOT:
+Find patterns that worked and create NEW concepts.
 
-- delete
-- summarize
-- shorten
-- rewrite
-- remove
-- merge away
-- change
+Avoid:
+- duplicate titles
+- duplicate premises
+- slightly renamed old ideas
+- recycled twists
 
-any original information.
-
-Preserve:
-
-- titles
-- ideas
-- numbers
-- statistics
-- names
-- hooks
-- descriptions
-- audiences
-- durations
-- viral potential
-- analysis
-- loglines
-- content points
-
-ONLY improve organization and readability.
-
-ORIGINAL REPORT:
+PREVIOUS REPORT:
 
 {original_report}
 
 ============================================================
-END ORIGINAL REPORT
+END PREVIOUS REPORT
 ============================================================
 """
 
     prompt = f"""
-You are a professional YouTube Trend Intelligence analyst.
 
-Create a professional YouTube Trend Intelligence Report.
+You are a PROFESSIONAL YOUTUBE STORY DEVELOPMENT WRITER.
 
-The report must cover:
+You are NOT a generic AI idea generator.
 
-1. What are trending in India/worldwide on YouTube?
+Your job is to create YouTube concepts that make viewers
+STOP scrolling and think:
 
-2. What genres are trending in India/worldwide?
+"WHAT IS HAPPENING?"
 
-3. YouTube Shorts ideas and loglines based on trends.
+"I NEED TO KNOW THE ANSWER."
 
-4. Long-form 8–10 minute video ideas and loglines.
+"WAIT... THAT DOESN'T MAKE SENSE."
 
-5. Shorts crime-comedy ideas based on trends and normal ideas.
-
-6. Thriller/Comedy ideas based on trends and normal ideas.
+The creator wants ORIGINAL, ENGAGING, SHOOTABLE stories.
 
 ============================================================
-GOAL
+CREATOR PROFILE
 ============================================================
 
-The creator wants:
+The creator is a solo filmmaker.
 
-- YouTube monetization in 5 months
-- strong content
-- high CTR
-- strong audience curiosity
+Typical production:
 
-Do NOT give generic content strategy.
-
-Give ideas and loglines.
-
-============================================================
-CREATOR FIT
-============================================================
-
-Prioritize concepts that can naturally work for:
-
-- solo creator
-- single actor
+- one actor
+- one person on camera
 - simple locations
+- terrace
+- apartment
+- room
+- lobby
+- staircase
+- nearby street
+- morning/daylight
+- static camera possible
+- minimal equipment
+- no expensive VFX
+- no second actor required
+
+Preferred genres:
+
 - thriller
+- mystery
+- suspense
 - comedy
 - crime-comedy
-- suspense
-- relatable situations
-- Telugu/Indian audience
-- high curiosity
-- high CTR
+- thriller + comedy
+
+Audience:
+
+- Telugu audience
+- Indian audience
+- normal YouTube viewers
+
+The story must feel REAL.
 
 ============================================================
-INDIA YOUTUBE DATA
+MOST IMPORTANT RULE
 ============================================================
+
+DO NOT CREATE SILLY IDEAS.
+
+Reject concepts like:
+
+"My chair moved."
+
+"Someone knocked."
+
+"I saw a shadow."
+
+"My phone disappeared."
+
+"I heard a sound."
+
+These are NOT stories by themselves.
+
+The event must lead to a meaningful question,
+investigation and payoff.
+
+============================================================
+THE STORY ENGINE
+============================================================
+
+Every idea must follow this structure:
+
+RELATABLE NORMAL LIFE
+
+↓
+
+SMALL STRANGE EVENT
+
+↓
+
+CLEAR MYSTERY QUESTION
+
+↓
+
+INVESTIGATION
+
+↓
+
+SECOND CLUE
+
+↓
+
+ESCALATION
+
+↓
+
+FALSE EXPLANATION
+
+↓
+
+NEW CONTRADICTION
+
+↓
+
+FINAL CLUE
+
+↓
+
+LOGICAL REVEAL
+
+↓
+
+COMEDY / EMOTIONAL / THRILLER PAYOFF
+
+============================================================
+1. RELATABLE START
+============================================================
+
+Begin with something normal.
+
+Examples:
+
+- going to the terrace
+- drying clothes
+- checking a water tank
+- drinking tea
+- charging a phone
+- working on laptop
+- preparing for work
+- checking a parcel
+- cleaning
+- taking a selfie
+- checking CCTV
+- looking for keys
+- receiving a delivery
+- checking a bike
+- using an elevator
+
+The first scene should feel ordinary.
+
+============================================================
+2. STRANGE EVENT
+============================================================
+
+Something specific happens.
+
+BAD:
+
+"Something strange happened."
+
+GOOD:
+
+"I left my laptop facing the wall.
+When I returned, the laptop was facing the camera."
+
+Specificity creates curiosity.
+
+============================================================
+3. MYSTERY QUESTION
+============================================================
+
+The viewer must immediately have a question.
+
+Examples:
+
+Who changed it?
+
+How did they enter?
+
+Why would someone do this?
+
+Did I accidentally miss something?
+
+Why does this keep happening?
+
+Who knew I was here?
+
+How did this object appear?
+
+What happened before I arrived?
+
+============================================================
+4. ESCALATION
+============================================================
+
+The mystery cannot stay at the same level.
+
+Example:
+
+EVENT 1:
+Chair moved.
+
+EVENT 2:
+Chair moved again.
+
+EVENT 3:
+Camera shows nobody entering.
+
+EVENT 4:
+A small object appears in the recording.
+
+EVENT 5:
+The protagonist realizes the object was already in
+his room.
+
+Now the viewer NEEDS the answer.
+
+============================================================
+5. FALSE EXPLANATION
+============================================================
+
+The protagonist should form a believable theory.
+
+Examples:
+
+Maybe neighbour entered.
+
+Maybe someone has a spare key.
+
+Maybe the security guard moved it.
+
+Maybe the camera missed someone.
+
+Maybe I accidentally did it.
+
+But later evidence must challenge that theory.
+
+============================================================
+6. CLUES
+============================================================
+
+Plant clues before the reveal.
+
+Every important clue must have a purpose.
+
+The final reveal must make the audience think:
+
+"OH! THAT'S WHY."
+
+Not:
+
+"Where did that come from?"
+
+============================================================
+7. LOGICAL REVEAL
+============================================================
+
+The ending should explain earlier events.
+
+Do NOT use random twists.
+
+Avoid:
+
+- "It was all a dream."
+- "It was a ghost."
+- "It was just imagination."
+- random prank
+- random stranger
+- random cat
+- unexplained coincidence
+
+Unless the story genuinely builds toward it.
+
+============================================================
+8. COMEDY
+============================================================
+
+Comedy should come from the situation.
+
+Good comedy:
+
+The protagonist builds an elaborate theory,
+only to discover he caused part of the problem himself.
+
+Bad comedy:
+
+Random funny dialogue with no connection to the story.
+
+============================================================
+TITLE RULE
+============================================================
+
+Titles must create curiosity.
+
+Use different styles.
+
+Examples:
+
+"Nenu Terrace Ki Vellina 10 Minutes Tarvatha..."
+
+"Every Morning Someone Was Moving My Chair"
+
+"Nenu Lock Chesi Vellanu... Mari Idi Ela Jarigindi?"
+
+"Someone Was Using My Terrace"
+
+"Naa Camera Record Chesina Oka Strange Thing"
+
+"Ignored One Small Detail... Then This Happened"
+
+Do NOT end every title with:
+
+"Chudandi"
+
+Do NOT make every title identical.
+
+============================================================
+HOOK RULE
+============================================================
+
+The first 3–10 seconds must contain a question,
+contradiction or unusual event.
+
+BAD:
+
+"Hi guys, welcome back."
+
+GOOD:
+
+"I locked this terrace last night.
+Then why is my chair facing the exact place
+where I was standing?"
+
+============================================================
+8–10 MINUTE VIDEO RULE
+============================================================
+
+Long-form ideas must actually contain enough story.
+
+Structure:
+
+ACT 1
+Normal situation
+
+ACT 2
+First strange event
+
+ACT 3
+Investigation
+
+ACT 4
+First theory
+
+ACT 5
+Theory fails
+
+ACT 6
+New clue
+
+ACT 7
+Major escalation
+
+ACT 8
+Final investigation
+
+ACT 9
+Reveal
+
+ACT 10
+Payoff
+
+Do NOT take a 30-second idea and stretch it into 10 minutes.
+
+============================================================
+SHORTS RULE
+============================================================
+
+Shorts should have:
+
+0–3 sec
+HOOK
+
+3–10 sec
+STRANGE EVENT
+
+10–25 sec
+INVESTIGATION
+
+25–45 sec
+ESCALATION
+
+45–55 sec
+REVEAL
+
+55–60 sec
+PAYOFF
+
+============================================================
+TELUGU / INDIAN RELATABILITY
+============================================================
+
+Naturally use situations such as:
+
+- apartment
+- terrace
+- neighbours
+- courier
+- UPI
+- WhatsApp
+- CCTV
+- lift
+- staircase
+- water tank
+- clothes
+- bike
+- helmet
+- keys
+- phone
+- laptop
+- power cut
+- inverter
+- food delivery
+- office call
+- online shopping
+- morning routine
+
+Do NOT force Indian references.
+
+STORY FIRST.
+
+============================================================
+TREND DATA
+============================================================
+
+Use current trend data as inspiration.
+
+Do NOT copy trending videos.
+
+Convert trend patterns into original concepts.
+
+INDIA DATA:
 
 {json.dumps(
     india_videos,
@@ -571,26 +946,7 @@ INDIA YOUTUBE DATA
     ensure_ascii=False
 )}
 
-============================================================
-WORLDWIDE PROXY DATA
-============================================================
-
-{json.dumps(
-    worldwide_videos,
-    indent=2,
-    ensure_ascii=False
-)}
-
-YouTube Data API requires a region code.
-
-The worldwide section uses the United States as a broad
-global trend proxy.
-
-Do not falsely claim it represents every worldwide trend.
-
-============================================================
-INDIA SUMMARY
-============================================================
+INDIA SUMMARY:
 
 {json.dumps(
     india_summary,
@@ -598,9 +954,15 @@ INDIA SUMMARY
     ensure_ascii=False
 )}
 
-============================================================
-WORLDWIDE SUMMARY
-============================================================
+WORLDWIDE DATA:
+
+{json.dumps(
+    worldwide_videos,
+    indent=2,
+    ensure_ascii=False
+)}
+
+WORLDWIDE SUMMARY:
 
 {json.dumps(
     worldwide_summary,
@@ -608,51 +970,187 @@ WORLDWIDE SUMMARY
     ensure_ascii=False
 )}
 
+IMPORTANT:
+
+Worldwide data is represented using the US region
+as a broad proxy.
+
+Do not claim it represents every country.
+
 {original_section}
 
 ============================================================
-EVERY IDEA
+INTERNAL IDEA GENERATION
 ============================================================
 
-Every video idea must contain:
+Generate MANY candidate ideas internally.
 
-TITLE
-GENRE
-LOGLINE
-HOOK
-CONTENT SUMMARY
-VIDEO OUTLINE
-TARGET AUDIENCE
-ESTIMATED DURATION
+For every candidate:
+
+1. Is the situation relatable?
+
+2. Is the first event specific?
+
+3. Is there a strong question?
+
+4. Does the mystery escalate?
+
+5. Is there a believable false explanation?
+
+6. Are clues planted?
+
+7. Does the reveal explain the clues?
+
+8. Is the ending satisfying?
+
+9. Can one actor shoot it?
+
+10. Does it feel like a real YouTube story?
+
+If the answer is NO to important questions:
+
+DELETE THE IDEA.
+
+Generate another.
+
+Return only the strongest concepts.
+
+============================================================
+QUALITY BAR
+============================================================
+
+10 strong ideas are better than 50 weak ideas.
+
+Never fill the report just to increase the number.
+
+Every idea must feel:
+
+- interesting
+- believable
+- visual
+- shootable
+- suspenseful
+- relatable
+- logically constructed
+
+============================================================
+EVERY IDEA MUST CONTAIN
+============================================================
+
+title
+
+genre
+
+logline
+
+hook
+
+setup
+
+mystery_question
+
+escalation
+
+false_explanation
+
+clues
+
+reveal
+
+ending_payoff
+
+content_summary
+
+video_outline
+
+target_audience
+
+estimated_duration
+
+shooting_difficulty
+
+viral_potential
+
+why_viewer_will_continue
+
+why_this_is_not_silly
+
+============================================================
+LOGLINE RULE
+============================================================
+
+The logline must include:
+
+PROTAGONIST
++
+NORMAL SITUATION
++
+STRANGE EVENT
++
+GOAL
++
+OBSTACLE
++
+MYSTERY
+
+Bad:
+
+"A man experiences a strange event."
+
+Good:
+
+"While preparing for work, a man notices that someone keeps
+moving his terrace chair every morning; convinced somebody is
+entering his locked terrace, he secretly records the area,
+but the footage creates an even bigger mystery."
+
+============================================================
+WHY VIEWER WILL CONTINUE
+============================================================
+
+Explain the curiosity chain.
+
+Example:
+
+"First the viewer wants to know who moved the chair.
+Then they want to know how the person entered.
+Then the recording proves nobody entered.
+Finally a small clue reveals what actually happened."
+
+============================================================
+WHY THIS IS NOT SILLY
+============================================================
+
+Explain why the concept is:
+
+- believable
+- relatable
+- logically constructed
+- not dependent on random coincidence
+
+============================================================
 VIRAL POTENTIAL
+============================================================
 
-VIRAL POTENTIAL:
+Use only:
 
 HIGH
 MEDIUM
 LOW
 
-============================================================
-LOGLINE
-============================================================
-
-The logline should clearly communicate:
-
-- protagonist
-- situation
-- goal
-- obstacle
-- curiosity
-
-Avoid vague concepts.
+Do not call everything HIGH.
 
 ============================================================
-OUTPUT
+OUTPUT FORMAT
 ============================================================
 
-Return ONLY valid JSON.
+RETURN ONLY VALID JSON.
 
-Use exactly:
+No markdown.
+
+No explanation outside JSON.
+
+Use:
 
 {{
   "report_title":
@@ -660,9 +1158,7 @@ Use exactly:
 
   "executive_goal": {{
     "goal": "",
-    "best_direction": "",
-    "best_idea_title": "",
-    "best_idea_logline": "",
+    "content_direction": "",
     "reason": ""
   }},
 
@@ -701,37 +1197,66 @@ Use exactly:
     "genre": "",
     "logline": "",
     "hook": "",
+    "setup": "",
+    "mystery_question": "",
+    "escalation": "",
+    "false_explanation": "",
+    "clues": [],
+    "reveal": "",
+    "ending_payoff": "",
     "content_summary": "",
     "video_outline": [],
     "target_audience": "",
     "estimated_duration": "",
+    "shooting_difficulty": "",
     "viral_potential": "",
-    "why_best_for_monetization": ""
+    "why_viewer_will_continue": "",
+    "why_this_is_not_silly": ""
   }}
 }}
 
-Every idea object must contain:
+Every idea object MUST contain:
 
-{{
-    "title": "",
-    "genre": "",
-    "logline": "",
-    "hook": "",
-    "content_summary": "",
-    "video_outline": [],
-    "target_audience": "",
-    "estimated_duration": "",
-    "viral_potential": ""
-}}
+title
+genre
+logline
+hook
+setup
+mystery_question
+escalation
+false_explanation
+clues
+reveal
+ending_payoff
+content_summary
+video_outline
+target_audience
+estimated_duration
+shooting_difficulty
+viral_potential
+why_viewer_will_continue
+why_this_is_not_silly
 
-Preserve all original report information when provided.
+FINAL QUALITY RULE:
+
+If the idea sounds like an AI randomly invented it:
+
+DELETE IT.
+
+If the idea sounds like a normal Telugu/Indian person could
+actually experience it and become curious:
+
+KEEP IT.
+
+Generate ORIGINAL ENGAGING STORIES.
 """
+
 
     return prompt
 
 
 # ============================================================
-# GEMINI
+# GEMINI GENERATION
 # ============================================================
 
 def generate_report(
@@ -740,9 +1265,11 @@ def generate_report(
     original_report
 ):
 
+    print()
     print(
-        "[3/5] Generating report with Gemini..."
+        "[3/5] Generating engaging YouTube ideas with Gemini..."
     )
+    print()
 
     client = genai.Client(
         api_key=GEMINI_API_KEY
@@ -764,8 +1291,14 @@ def generate_report(
 
             response_mime_type="application/json",
 
-            temperature=0.4,
-        ),
+            temperature=0.85,
+
+            top_p=0.95,
+
+            top_k=40,
+
+            max_output_tokens=30000
+        )
     )
 
     if not response.text:
@@ -776,40 +1309,108 @@ def generate_report(
 
     text = response.text.strip()
 
-    if text.startswith("```"):
+    if text.startswith("```json"):
 
-        text = text.replace(
-            "```json",
-            ""
-        )
+        text = text[7:]
 
-        text = text.replace(
-            "```",
-            ""
-        )
+    elif text.startswith("```"):
 
-        text = text.strip()
+        text = text[3:]
+
+    if text.endswith("```"):
+
+        text = text[:-3]
+
+    text = text.strip()
 
     try:
 
-        return json.loads(
-            text
-        )
+        report = json.loads(text)
 
     except json.JSONDecodeError as error:
 
         print()
-        print(
-            "Gemini returned invalid JSON."
-        )
+        print("=" * 70)
+        print("GEMINI JSON ERROR")
+        print("=" * 70)
+        print()
 
         print(
-            text[:5000]
+            text[:10000]
         )
+
+        print()
 
         raise RuntimeError(
             f"Gemini JSON parsing failed: {error}"
         )
+
+    required_sections = [
+
+        "shorts_trend_ideas",
+
+        "long_form_trend_ideas",
+
+        "crime_comedy_shorts_trend_based",
+
+        "crime_comedy_shorts_normal",
+
+        "thriller_comedy_trend_based",
+
+        "thriller_comedy_normal",
+
+        "monetization_5_months_best_ideas",
+
+        "final_best_idea"
+    ]
+
+    for section in required_sections:
+
+        if section not in report:
+
+            raise RuntimeError(
+                f"Gemini response missing section: {section}"
+            )
+
+    print()
+    print("=" * 70)
+    print("ENGAGING IDEA GENERATION COMPLETE")
+    print("=" * 70)
+    print()
+
+    print(
+        "Shorts ideas:",
+        len(
+            report.get(
+                "shorts_trend_ideas",
+                []
+            )
+        )
+    )
+
+    print(
+        "Long-form ideas:",
+        len(
+            report.get(
+                "long_form_trend_ideas",
+                []
+            )
+        )
+    )
+
+    print(
+        "Thriller/Comedy ideas:",
+        len(
+            report.get(
+                "thriller_comedy_normal",
+                []
+            )
+        )
+    )
+
+    print()
+
+    return report
 
 
 # ============================================================
@@ -831,7 +1432,6 @@ def setup_font():
         Path(
             "C:/Windows/Fonts/calibri.ttf"
         ),
-
     ]
 
     for path in candidates:
@@ -939,12 +1539,11 @@ def make_styles(font):
             firstLineIndent=-3 * mm,
             spaceAfter=1.5 * mm,
         ),
-
     }
 
 
 # ============================================================
-# PDF TEXT HELPERS
+# PDF SAFE TEXT
 # ============================================================
 
 def safe(value):
@@ -968,6 +1567,10 @@ def safe(value):
         )
     )
 
+
+# ============================================================
+# PDF FIELD
+# ============================================================
 
 def add_field(
     story,
@@ -1021,12 +1624,10 @@ def add_field(
 
 
 # ============================================================
-# VIRAL POTENTIAL
+# VIRAL BACKGROUND
 # ============================================================
 
-def viral_background(
-    value
-):
+def viral_background(value):
 
     value = str(
         value or ""
@@ -1050,26 +1651,13 @@ def viral_background(
 
 
 # ============================================================
-# IMPORTANT PDF FIX
+# IDEA CARD
 # ============================================================
 
 def idea_card(
     idea,
     styles
 ):
-    """
-    IMPORTANT:
-
-    Do NOT put the entire idea inside one Table.
-
-    Long ideas must be allowed to flow naturally across
-    multiple pages.
-
-    This fixes:
-
-    Flowable Table too large on page
-    tallest cell too large
-    """
 
     story = []
 
@@ -1092,7 +1680,6 @@ def idea_card(
         )
     )
 
-    # Small editorial divider.
     story.append(
         HRFlowable(
             width="100%",
@@ -1109,44 +1696,101 @@ def idea_card(
         story,
         styles,
         "GENRE",
-        idea.get(
-            "genre"
-        )
+        idea.get("genre")
     )
 
     add_field(
         story,
         styles,
         "LOGLINE",
-        idea.get(
-            "logline"
-        )
+        idea.get("logline")
     )
 
     add_field(
         story,
         styles,
         "HOOK",
-        idea.get(
-            "hook"
-        )
+        idea.get("hook")
+    )
+
+    add_field(
+        story,
+        styles,
+        "SETUP",
+        idea.get("setup")
+    )
+
+    add_field(
+        story,
+        styles,
+        "MYSTERY QUESTION",
+        idea.get("mystery_question")
+    )
+
+    add_field(
+        story,
+        styles,
+        "ESCALATION",
+        idea.get("escalation")
+    )
+
+    add_field(
+        story,
+        styles,
+        "FALSE EXPLANATION",
+        idea.get("false_explanation")
+    )
+
+    add_field(
+        story,
+        styles,
+        "CLUES",
+        idea.get("clues")
+    )
+
+    add_field(
+        story,
+        styles,
+        "REVEAL",
+        idea.get("reveal")
+    )
+
+    add_field(
+        story,
+        styles,
+        "ENDING PAYOFF",
+        idea.get("ending_payoff")
     )
 
     add_field(
         story,
         styles,
         "CONTENT SUMMARY",
-        idea.get(
-            "content_summary"
-        )
+        idea.get("content_summary")
     )
 
     add_field(
         story,
         styles,
         "VIDEO OUTLINE",
+        idea.get("video_outline")
+    )
+
+    add_field(
+        story,
+        styles,
+        "WHY VIEWER WILL CONTINUE",
         idea.get(
-            "video_outline"
+            "why_viewer_will_continue"
+        )
+    )
+
+    add_field(
+        story,
+        styles,
+        "WHY THIS IS NOT SILLY",
+        idea.get(
+            "why_this_is_not_silly"
         )
     )
 
@@ -1154,17 +1798,22 @@ def idea_card(
         story,
         styles,
         "TARGET AUDIENCE",
-        idea.get(
-            "target_audience"
-        )
+        idea.get("target_audience")
     )
 
     add_field(
         story,
         styles,
         "ESTIMATED DURATION",
+        idea.get("estimated_duration")
+    )
+
+    add_field(
+        story,
+        styles,
+        "SHOOTING DIFFICULTY",
         idea.get(
-            "estimated_duration"
+            "shooting_difficulty"
         )
     )
 
@@ -1236,7 +1885,6 @@ def idea_card(
                 (-1, -1),
                 2 * mm
             ),
-
         ])
     )
 
@@ -1384,7 +2032,7 @@ def create_pdf(
 
     story.append(
         Paragraph(
-            "1. MONETIZATION GOAL & BEST DIRECTION",
+            "1. CONTENT DIRECTION",
             styles["section"]
         )
     )
@@ -1398,35 +2046,15 @@ def create_pdf(
         story,
         styles,
         "GOAL",
-        executive.get(
-            "goal"
-        )
+        executive.get("goal")
     )
 
     add_field(
         story,
         styles,
-        "BEST DIRECTION",
+        "CONTENT DIRECTION",
         executive.get(
-            "best_direction"
-        )
-    )
-
-    add_field(
-        story,
-        styles,
-        "BEST IDEA",
-        executive.get(
-            "best_idea_title"
-        )
-    )
-
-    add_field(
-        story,
-        styles,
-        "LOGLINE",
-        executive.get(
-            "best_idea_logline"
+            "content_direction"
         )
     )
 
@@ -1434,9 +2062,7 @@ def create_pdf(
         story,
         styles,
         "REASON",
-        executive.get(
-            "reason"
-        )
+        executive.get("reason")
     )
 
     # ========================================================
@@ -1445,7 +2071,7 @@ def create_pdf(
 
     story.append(
         Paragraph(
-            "2. INDIA — WHAT IS TRENDING ON YOUTUBE",
+            "2. INDIA — WHAT IS TRENDING",
             styles["section"]
         )
     )
@@ -1459,45 +2085,35 @@ def create_pdf(
         story,
         styles,
         "OVERVIEW",
-        india.get(
-            "overview"
-        )
+        india.get("overview")
     )
 
     add_field(
         story,
         styles,
         "TRENDING TOPICS",
-        india.get(
-            "trending_topics"
-        )
+        india.get("trending_topics")
     )
 
     add_field(
         story,
         styles,
         "TRENDING FORMATS",
-        india.get(
-            "trending_formats"
-        )
+        india.get("trending_formats")
     )
 
     add_field(
         story,
         styles,
         "TRENDING GENRES",
-        india.get(
-            "trending_genres"
-        )
+        india.get("trending_genres")
     )
 
     add_field(
         story,
         styles,
         "EVIDENCE",
-        india.get(
-            "evidence"
-        )
+        india.get("evidence")
     )
 
     # ========================================================
@@ -1506,7 +2122,7 @@ def create_pdf(
 
     story.append(
         Paragraph(
-            "3. WORLDWIDE — WHAT IS TRENDING ON YOUTUBE",
+            "3. WORLDWIDE — TREND PROXY",
             styles["section"]
         )
     )
@@ -1520,45 +2136,35 @@ def create_pdf(
         story,
         styles,
         "OVERVIEW",
-        worldwide.get(
-            "overview"
-        )
+        worldwide.get("overview")
     )
 
     add_field(
         story,
         styles,
         "TRENDING TOPICS",
-        worldwide.get(
-            "trending_topics"
-        )
+        worldwide.get("trending_topics")
     )
 
     add_field(
         story,
         styles,
         "TRENDING FORMATS",
-        worldwide.get(
-            "trending_formats"
-        )
+        worldwide.get("trending_formats")
     )
 
     add_field(
         story,
         styles,
         "TRENDING GENRES",
-        worldwide.get(
-            "trending_genres"
-        )
+        worldwide.get("trending_genres")
     )
 
     add_field(
         story,
         styles,
         "EVIDENCE",
-        worldwide.get(
-            "evidence"
-        )
+        worldwide.get("evidence")
     )
 
     # ========================================================
@@ -1568,12 +2174,12 @@ def create_pdf(
     sections = [
 
         (
-            "4. YOUTUBE SHORTS IDEAS BASED ON CURRENT TRENDS",
+            "4. SHORTS — TREND BASED",
             "shorts_trend_ideas"
         ),
 
         (
-            "5. LONG-FORM VIDEO IDEAS — 8–10 MINUTES",
+            "5. LONG-FORM — 8–10 MINUTES",
             "long_form_trend_ideas"
         ),
 
@@ -1583,7 +2189,7 @@ def create_pdf(
         ),
 
         (
-            "7. CRIME-COMEDY SHORTS — NORMAL / ORIGINAL",
+            "7. CRIME-COMEDY SHORTS — ORIGINAL",
             "crime_comedy_shorts_normal"
         ),
 
@@ -1593,10 +2199,9 @@ def create_pdf(
         ),
 
         (
-            "9. THRILLER/COMEDY — NORMAL / ORIGINAL",
+            "9. THRILLER/COMEDY — ORIGINAL",
             "thriller_comedy_normal"
         ),
-
     ]
 
     for section_title, key in sections:
@@ -1615,9 +2220,6 @@ def create_pdf(
 
         for idea in ideas:
 
-            # IMPORTANT:
-            # Do not KeepTogether the entire idea.
-            # It is allowed to split naturally.
             story.extend(
                 idea_card(
                     idea,
@@ -1631,7 +2233,7 @@ def create_pdf(
 
     story.append(
         Paragraph(
-            "10. BEST IDEAS FOR 5-MONTH MONETIZATION",
+            "10. BEST IDEAS FOR 5-MONTH GOAL",
             styles["section"]
         )
     )
@@ -1651,12 +2253,12 @@ def create_pdf(
         )
 
     # ========================================================
-    # FINAL BEST IDEA
+    # FINAL IDEA
     # ========================================================
 
     story.append(
         Paragraph(
-            "11. FINAL BEST IDEA",
+            "11. FINAL SELECTED IDEA",
             styles["section"]
         )
     )
@@ -1670,15 +2272,6 @@ def create_pdf(
         idea_card(
             final,
             styles
-        )
-    )
-
-    add_field(
-        story,
-        styles,
-        "WHY BEST FOR MONETIZATION",
-        final.get(
-            "why_best_for_monetization"
         )
     )
 
@@ -1796,11 +2389,11 @@ def send_email(
 
                 <p>
                     Your latest YouTube Trend Intelligence
-                    Report has been generated successfully.
+                    Report has been generated.
                 </p>
 
                 <h2>
-                    Final Best Idea
+                    Final Idea
                 </h2>
 
                 <p>
@@ -1809,25 +2402,25 @@ def send_email(
                     </strong>
                 </p>
 
-                <p>
-                    The professional PDF report is attached.
-                </p>
-
                 <ul>
                     <li>India YouTube trends</li>
                     <li>Worldwide trend proxy</li>
                     <li>Trending genres</li>
-                    <li>YouTube Shorts ideas</li>
-                    <li>8–10 minute long-form ideas</li>
-                    <li>Crime-comedy Shorts</li>
-                    <li>Thriller/Comedy ideas</li>
-                    <li>Loglines</li>
+                    <li>Engaging Shorts ideas</li>
+                    <li>8–10 minute ideas</li>
+                    <li>Crime-comedy ideas</li>
+                    <li>Thriller/comedy ideas</li>
                     <li>Hooks</li>
-                    <li>Target audiences</li>
-                    <li>Estimated durations</li>
-                    <li>Viral potential</li>
-                    <li>5-month monetization ideas</li>
+                    <li>Mystery questions</li>
+                    <li>Escalation</li>
+                    <li>Clues</li>
+                    <li>Reveals</li>
+                    <li>Ending payoffs</li>
                 </ul>
+
+                <p>
+                    The complete PDF report is attached.
+                </p>
 
             </div>
             """,
@@ -1898,7 +2491,7 @@ def main():
     validate_environment()
 
     # --------------------------------------------------------
-    # 1
+    # STEP 1
     # --------------------------------------------------------
 
     print(
@@ -1912,13 +2505,12 @@ def main():
     )
 
     # --------------------------------------------------------
-    # 2
+    # STEP 2
     # --------------------------------------------------------
 
     print()
     print(
-        "[2/5] Fetching current India/World proxy "
-        "YouTube data..."
+        "[2/5] Fetching current India/World YouTube data..."
     )
 
     print()
@@ -1949,9 +2541,7 @@ def main():
     )
 
     print(
-        "Note: YouTube Data API requires a region code, "
-        "so WORLD is represented by the United States "
-        "as a broad global trend proxy."
+        "Worldwide proxy uses US region data."
     )
 
     print(
@@ -1975,13 +2565,13 @@ def main():
     )
 
     # --------------------------------------------------------
-    # ORIGINAL REPORT
+    # PREVIOUS REPORT
     # --------------------------------------------------------
 
     original_report = load_original_report()
 
     # --------------------------------------------------------
-    # 3
+    # STEP 3
     # --------------------------------------------------------
 
     report = generate_report(
@@ -1991,16 +2581,12 @@ def main():
     )
 
     # --------------------------------------------------------
-    # JSON
+    # STEP 4
     # --------------------------------------------------------
 
     save_json(
         report
     )
-
-    # --------------------------------------------------------
-    # 4
-    # --------------------------------------------------------
 
     create_pdf(
         report,
@@ -2008,7 +2594,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # 5
+    # STEP 5
     # --------------------------------------------------------
 
     send_email(
@@ -2065,9 +2651,11 @@ if __name__ == "__main__":
         print("ERROR")
         print("=" * 70)
         print()
+
         print(
             str(error)
         )
+
         print()
 
         sys.exit(1)

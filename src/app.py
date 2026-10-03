@@ -1,32 +1,19 @@
-```python
 import os
 import sys
-import subprocess
+import traceback
 from pathlib import Path
 from datetime import datetime
 
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    load_dotenv = None
-
 
 # ============================================================
-# PROJECT PATHS
+# PROJECT CONFIGURATION
 # ============================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SRC_DIR = PROJECT_ROOT / "src"
-DATA_DIR = PROJECT_ROOT / "data"
-REPORTS_DIR = PROJECT_ROOT / "reports"
-SUMMARIES_DIR = PROJECT_ROOT / "summaries"
-
-ENV_FILE = PROJECT_ROOT / ".env"
-
-
-# ============================================================
-# CREATE REQUIRED FOLDERS
-# ============================================================
+BASE_DIR = Path(__file__).resolve().parent.parent
+SRC_DIR = BASE_DIR / "src"
+DATA_DIR = BASE_DIR / "data"
+REPORTS_DIR = BASE_DIR / "reports"
+SUMMARIES_DIR = BASE_DIR / "summaries"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -34,159 +21,132 @@ SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================
-# LOAD .ENV
+# ENVIRONMENT
 # ============================================================
 
-if load_dotenv:
-    if ENV_FILE.exists():
-        load_dotenv(ENV_FILE)
-        print(f"✓ Loaded environment file: {ENV_FILE}")
+try:
+    from dotenv import load_dotenv
+
+    env_file = BASE_DIR / ".env"
+
+    if env_file.exists():
+        load_dotenv(env_file)
     else:
-        print("⚠ .env file not found.")
-        print("Using environment variables from the system/GitHub Actions.")
+        load_dotenv()
+
+except ImportError:
+    pass
 
 
 # ============================================================
 # HELPERS
 # ============================================================
 
-def get_env(name):
-    """
-    Get environment variable safely.
-    """
-    value = os.getenv(name)
-
-    if value:
-        return value.strip()
-
-    return None
+def print_header():
+    print()
+    print("=" * 50)
+    print("STARTING YOUTUBE TREND INTELLIGENCE")
+    print("=" * 50)
+    print()
 
 
 def check_environment():
-    """
-    Check all required environment variables.
-    """
-
+    print("Checking environment variables...")
     print()
-    print("=" * 70)
-    print("CHECKING ENVIRONMENT VARIABLES")
-    print("=" * 70)
 
     required = {
-        "YOUTUBE_API_KEY": get_env("YOUTUBE_API_KEY"),
-        "OPENROUTER_API_KEY": get_env("OPENROUTER_API_KEY"),
-        "GMAIL_USER": get_env("GMAIL_USER"),
-        "GMAIL_TO": get_env("GMAIL_TO"),
-        "GMAIL_APP_PASSWORD": get_env("GMAIL_APP_PASSWORD"),
+        "YOUTUBE_API_KEY": os.getenv("YOUTUBE_API_KEY"),
+        "GEMINI_API_KEY": os.getenv("GEMINI_API_KEY"),
+        "GMAIL_USER": os.getenv("GMAIL_USER"),
+        "GMAIL_TO": os.getenv("GMAIL_TO"),
+        "GMAIL_APP_PASSWORD": os.getenv("GMAIL_APP_PASSWORD"),
     }
 
     missing = []
 
     for name, value in required.items():
-
         if value:
             print(f"✓ {name} found")
         else:
-            print(f"⚠ {name} not found")
+            print(f"✗ {name} is missing")
             missing.append(name)
 
     print()
 
-    # YouTube API is mandatory
-    if not required["YOUTUBE_API_KEY"]:
-        print("ERROR: YOUTUBE_API_KEY is missing.")
-        return False
+    if missing:
+        print("=" * 50)
+        print("ERROR: REQUIRED ENVIRONMENT VARIABLES ARE MISSING")
+        print("=" * 50)
 
-    # OpenRouter is mandatory because the project generates AI ideas
-    if not required["OPENROUTER_API_KEY"]:
-        print()
-        print("=" * 70)
-        print("ERROR: OPENROUTER_API_KEY IS MISSING")
-        print("=" * 70)
-        print()
-        print("For GitHub Actions:")
-        print("GitHub Repository")
-        print("→ Settings")
-        print("→ Secrets and variables")
-        print("→ Actions")
-        print("→ New repository secret")
-        print()
-        print("Name:")
-        print("OPENROUTER_API_KEY")
-        print()
-        print("Then paste your OpenRouter API key as the value.")
-        print()
-        return False
+        for item in missing:
+            print(f"  - {item}")
 
-    # Gmail variables are needed for email delivery
-    if not required["GMAIL_USER"]:
-        print("ERROR: GMAIL_USER is missing.")
-        return False
+        print()
+        print("GitHub Actions must provide these values through")
+        print("Repository Secrets.")
+        print()
 
-    if not required["GMAIL_TO"]:
-        print("ERROR: GMAIL_TO is missing.")
         return False
-
-    if not required["GMAIL_APP_PASSWORD"]:
-        print("ERROR: GMAIL_APP_PASSWORD is missing.")
-        return False
-
-    print("✓ All required environment variables are available.")
-    print()
 
     return True
 
 
 # ============================================================
-# RUN PYTHON SCRIPT
+# RUN MODULE
 # ============================================================
 
-def run_script(script_name):
+def run_module(module_name):
     """
-    Run another Python script from src/.
+    Run another Python module located inside src/.
     """
 
-    script_path = SRC_DIR / script_name
+    module_path = SRC_DIR / module_name
 
-    if not script_path.exists():
+    if not module_path.exists():
         print()
-        print(f"ERROR: {script_name} was not found.")
-        print(f"Expected location: {script_path}")
+        print(f"ERROR: Module not found:")
+        print(f"  {module_path}")
+        print()
+
         return False
 
     print()
     print("=" * 70)
-    print(f"RUNNING: {script_path}")
+    print(f"RUNNING: {module_name}")
     print("=" * 70)
     print()
 
     try:
+        import subprocess
 
         result = subprocess.run(
-            [sys.executable, str(script_path)],
-            cwd=str(PROJECT_ROOT),
+            [sys.executable, str(module_path)],
+            cwd=str(BASE_DIR),
             env=os.environ.copy(),
-            check=False
+            check=False,
         )
 
         if result.returncode != 0:
-
             print()
-            print(f"ERROR: {script_name} failed.")
+            print(f"ERROR: {module_name} failed.")
             print(f"Exit code: {result.returncode}")
+            print()
 
             return False
 
         print()
-        print(f"✓ {script_name} completed successfully.")
+        print(f"✓ {module_name} completed successfully")
+        print()
 
         return True
 
-    except Exception as e:
-
+    except Exception as exc:
         print()
-        print(f"ERROR while running {script_name}:")
-        print(str(e))
+        print(f"ERROR while running {module_name}:")
+        print(str(exc))
+        print()
+
+        traceback.print_exc()
 
         return False
 
@@ -197,116 +157,101 @@ def run_script(script_name):
 
 def main():
 
-    print("=" * 70)
-    print("YOUTUBE TREND INTELLIGENCE + IDEA GENERATOR")
-    print("=" * 70)
+    print_header()
 
-    print(f"Project root : {PROJECT_ROOT}")
-    print(f"Output folder: {SUMMARIES_DIR}")
-    print(
-        "Generated    : "
-        + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    )
-
+    print(f"Project root : {BASE_DIR}")
+    print(f"Source folder: {SRC_DIR}")
+    print(f"Data folder  : {DATA_DIR}")
+    print(f"Reports      : {REPORTS_DIR}")
+    print(f"Summaries    : {SUMMARIES_DIR}")
     print()
 
     # --------------------------------------------------------
-    # ENVIRONMENT CHECK
+    # Check required secrets
     # --------------------------------------------------------
 
     if not check_environment():
+        return 1
+
+    # --------------------------------------------------------
+    # Step 1 - YouTube trend collection
+    # --------------------------------------------------------
+
+    youtube_success = run_module("youtube_agent.py")
+
+    if not youtube_success:
+        print()
+        print("=" * 50)
+        print("YOUTUBE TREND COLLECTION FAILED")
+        print("=" * 50)
+        return 1
+
+    # --------------------------------------------------------
+    # Step 2 - AI idea generation
+    # --------------------------------------------------------
+
+    idea_success = run_module("idea_generator.py")
+
+    if not idea_success:
+        print()
+        print("=" * 50)
+        print("AI IDEA GENERATION FAILED")
+        print("=" * 50)
+        return 1
+
+    # --------------------------------------------------------
+    # Step 3 - Optional email module
+    # --------------------------------------------------------
+
+    email_module = SRC_DIR / "email_report.py"
+
+    if email_module.exists():
 
         print()
         print("=" * 70)
-        print("PROGRAM STOPPED")
+        print("EMAIL MODULE FOUND")
         print("=" * 70)
+        print()
 
-        sys.exit(1)
+        email_success = run_module("email_report.py")
 
-    # --------------------------------------------------------
-    # STEP 1
-    # --------------------------------------------------------
+        if not email_success:
+            print()
+            print("WARNING: Email sending failed.")
+            print("The trend and AI report were generated successfully.")
+            print()
 
-    print()
-    print("=" * 70)
-    print("STEP 1 - FETCHING YOUTUBE TREND DATA")
-    print("=" * 70)
-
-    if not run_script("youtube_agent.py"):
-        sys.exit(1)
-
-    # --------------------------------------------------------
-    # STEP 2
-    # --------------------------------------------------------
-
-    print()
-    print("=" * 70)
-    print("STEP 2 - GENERATING AI TREND SUMMARY")
-    print("=" * 70)
-
-    # Change this filename if your project uses another AI script.
-    ai_script = "ai_agent.py"
-
-    if (SRC_DIR / ai_script).exists():
-
-        if not run_script(ai_script):
-            sys.exit(1)
+            # Do not fail the entire workflow only because email failed.
+        else:
+            print("✓ Email sent successfully")
 
     else:
         print()
-        print(f"⚠ {ai_script} not found.")
-        print("Skipping separate AI step.")
-        print("AI processing may already be inside youtube_agent.py.")
-
-    # --------------------------------------------------------
-    # STEP 3 - EMAIL
-    # --------------------------------------------------------
-
-    print()
-    print("=" * 70)
-    print("STEP 3 - SENDING EMAIL")
-    print("=" * 70)
-
-    email_scripts = [
-        "email_agent.py",
-        "send_email.py",
-        "gmail_sender.py"
-    ]
-
-    email_script_found = False
-
-    for script in email_scripts:
-
-        if (SRC_DIR / script).exists():
-
-            email_script_found = True
-
-            if not run_script(script):
-                sys.exit(1)
-
-            break
-
-    if not email_script_found:
-
-        print()
-        print("⚠ No separate email script found.")
+        print("No email_report.py found.")
         print("Skipping email step.")
+        print()
 
     # --------------------------------------------------------
-    # COMPLETE
+    # Finished
     # --------------------------------------------------------
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     print()
     print("=" * 70)
-    print("YOUTUBE TREND INTELLIGENCE GENERATOR COMPLETED")
+    print("YOUTUBE TREND INTELLIGENCE COMPLETED")
     print("=" * 70)
     print()
-    print(f"Reports   : {REPORTS_DIR}")
-    print(f"Summaries : {SUMMARIES_DIR}")
+    print(f"Completed at: {now}")
     print()
-    print("✓ Finished successfully.")
+    print("Generated files can be found in:")
+    print(f"  {DATA_DIR}")
+    print(f"  {REPORTS_DIR}")
+    print(f"  {SUMMARIES_DIR}")
+    print()
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
-```
+    sys.exit(main())

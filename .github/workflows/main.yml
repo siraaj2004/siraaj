@@ -1,41 +1,245 @@
-```yaml
 name: YouTube Trend Intelligence
 
 on:
   workflow_dispatch:
 
   schedule:
+    # 03:00 UTC = 08:30 AM IST
     - cron: "0 3 * * *"
+
+    # 06:30 UTC = 12:00 PM IST
     - cron: "30 6 * * *"
+
+    # 10:30 UTC = 04:00 PM IST
     - cron: "30 10 * * *"
+
+    # 16:00 UTC = 09:30 PM IST
     - cron: "0 16 * * *"
+
 
 jobs:
   youtube-trend:
+
     runs-on: ubuntu-latest
+
+    env:
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      GMAIL_USER: ${{ secrets.GMAIL_USER }}
+      GMAIL_TO: ${{ secrets.GMAIL_TO }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
 
     steps:
 
+      # ======================================================
+      # 1. CHECKOUT
+      # ======================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+
+      # ======================================================
+      # 2. PYTHON
+      # ======================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+
+
+      # ======================================================
+      # 3. CHECK PYTHON
+      # ======================================================
+
+      - name: Check Python
+        run: |
+          python --version
+          python -m pip --version
+
+
+      # ======================================================
+      # 4. CHECK SECRETS
+      # ======================================================
+
+      - name: Check required secrets
+        shell: bash
+        run: |
+          set -e
+
+          echo "=============================================="
+          echo "CHECKING GITHUB SECRETS"
+          echo "=============================================="
+
+          missing=0
+
+          if [ -z "$YOUTUBE_API_KEY" ]; then
+            echo "❌ YOUTUBE_API_KEY is missing"
+            missing=1
+          else
+            echo "✓ YOUTUBE_API_KEY found"
+          fi
+
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "❌ OPENROUTER_API_KEY is missing"
+            missing=1
+          else
+            echo "✓ OPENROUTER_API_KEY found"
+          fi
+
+          if [ -z "$GMAIL_USER" ]; then
+            echo "❌ GMAIL_USER is missing"
+            missing=1
+          else
+            echo "✓ GMAIL_USER found"
+          fi
+
+          if [ -z "$GMAIL_TO" ]; then
+            echo "❌ GMAIL_TO is missing"
+            missing=1
+          else
+            echo "✓ GMAIL_TO found"
+          fi
+
+          if [ -z "$GMAIL_APP_PASSWORD" ]; then
+            echo "❌ GMAIL_APP_PASSWORD is missing"
+            missing=1
+          else
+            echo "✓ GMAIL_APP_PASSWORD found"
+          fi
+
+          echo "=============================================="
+
+          if [ "$missing" -ne 0 ]; then
+            echo ""
+            echo "ERROR: One or more GitHub Secrets are missing."
+            echo ""
+            echo "Go to:"
+            echo "Repository → Settings → Secrets and variables → Actions"
+            echo ""
+            echo "Required names:"
+            echo "YOUTUBE_API_KEY"
+            echo "OPENROUTER_API_KEY"
+            echo "GMAIL_USER"
+            echo "GMAIL_TO"
+            echo "GMAIL_APP_PASSWORD"
+            exit 1
+          fi
+
+          echo "✓ All required secrets are available."
+
+
+      # ======================================================
+      # 5. INSTALL DEPENDENCIES
+      # ======================================================
 
       - name: Install dependencies
+        shell: bash
         run: |
+          set -e
+
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+
+          if [ -f requirements.txt ]; then
+            echo "Installing requirements.txt..."
+            python -m pip install -r requirements.txt
+          else
+            echo "requirements.txt not found."
+            echo "Installing required packages..."
+
+            python -m pip install \
+              requests \
+              python-dotenv \
+              google-api-python-client \
+              reportlab
+          fi
+
+
+      # ======================================================
+      # 6. VERIFY REQUIRED FILES
+      # ======================================================
+
+      - name: Verify project files
+        shell: bash
+        run: |
+          set -e
+
+          echo "=============================================="
+          echo "PROJECT FILE CHECK"
+          echo "=============================================="
+
+          echo "Project:"
+          pwd
+
+          echo ""
+          echo "Files:"
+          find . -maxdepth 2 -type f | sort
+
+          echo ""
+
+          if [ ! -f "src/app.py" ]; then
+            echo "❌ src/app.py not found"
+            exit 1
+          fi
+
+          if [ ! -f "src/youtube_agent.py" ]; then
+            echo "❌ src/youtube_agent.py not found"
+            exit 1
+          fi
+
+          echo "✓ src/app.py found"
+          echo "✓ src/youtube_agent.py found"
+
+
+      # ======================================================
+      # 7. RUN APPLICATION
+      # ======================================================
 
       - name: Run YouTube Trend Intelligence
-        env:
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_TO: ${{ secrets.GMAIL_TO }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        shell: bash
         run: |
+          set -e
+
+          echo ""
+          echo "=============================================="
+          echo "STARTING YOUTUBE TREND INTELLIGENCE"
+          echo "=============================================="
+
           python src/app.py
-```
+
+
+      # ======================================================
+      # 8. SHOW OUTPUT
+      # ======================================================
+
+      - name: Show generated files
+        if: always()
+        shell: bash
+        run: |
+          echo ""
+          echo "=============================================="
+          echo "GENERATED FILES"
+          echo "=============================================="
+
+          if [ -d "data" ]; then
+            echo ""
+            echo "DATA:"
+            find data -type f -maxdepth 3 -print
+          fi
+
+          if [ -d "reports" ]; then
+            echo ""
+            echo "REPORTS:"
+            find reports -type f -maxdepth 3 -print
+          fi
+
+          if [ -d "summaries" ]; then
+            echo ""
+            echo "SUMMARIES:"
+            find summaries -type f -maxdepth 3 -print
+          fi
+
+          echo ""
+          echo "=============================================="

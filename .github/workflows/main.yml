@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
   schedule:
-    # Every hour
+    # Runs every hour
     - cron: "0 * * * *"
 
 permissions:
@@ -12,34 +12,56 @@ permissions:
 
 jobs:
   youtube-trend:
+
     runs-on: ubuntu-latest
 
     env:
+
+      # --------------------------------------------
+      # YouTube
+      # --------------------------------------------
+
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+
+      # --------------------------------------------
+      # AI
+      # --------------------------------------------
+
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+      # --------------------------------------------
+      # Gmail
+      # --------------------------------------------
+
       GMAIL_USER: ${{ secrets.GMAIL_USER }}
       GMAIL_TO: ${{ secrets.GMAIL_TO }}
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
 
     steps:
 
-      # --------------------------------------------------
-      # 1. Checkout repository
-      # --------------------------------------------------
+      # ============================================
+      # CHECKOUT
+      # ============================================
+
       - name: Checkout Repository
         uses: actions/checkout@v5
 
-      # --------------------------------------------------
-      # 2. Setup Python
-      # --------------------------------------------------
+      # ============================================
+      # PYTHON
+      # ============================================
+
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      # --------------------------------------------------
-      # 3. Install dependencies
-      # --------------------------------------------------
+      # ============================================
+      # INSTALL
+      # ============================================
+
       - name: Install Dependencies
         run: |
+
           python -m pip install --upgrade pip
 
           if [ -f requirements.txt ]; then
@@ -48,234 +70,55 @@ jobs:
 
           pip install reportlab
 
-      # --------------------------------------------------
-      # 4. Create required folders
-      # --------------------------------------------------
-      - name: Create Output Folders
-        run: |
-          mkdir -p summaries
-          mkdir -p output
-          mkdir -p reports
-          mkdir -p generated
-          mkdir -p pdf
+      # ============================================
+      # CREATE FOLDERS
+      # ============================================
 
-      # --------------------------------------------------
-      # 5. Run YouTube Trend Analysis
-      # --------------------------------------------------
-      - name: Run YouTube Trend Analysis
-        env:
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - name: Create Required Folders
         run: |
+
+          mkdir -p data
+          mkdir -p summaries
+          mkdir -p reports
+
+      # ============================================
+      # RUN APP
+      # ============================================
+
+      - name: Run YouTube Trend Analysis
+        run: |
+
           python src/app.py
 
-      # --------------------------------------------------
-      # 6. Show generated files
-      # --------------------------------------------------
+      # ============================================
+      # SHOW FILES
+      # ============================================
+
       - name: Show Generated Files
         run: |
+
           echo "======================================"
-          echo "ALL GENERATED FILES"
+          echo "DATA FILES"
           echo "======================================"
 
-          find . -type f \
-            -not -path "./.git/*" \
-            -not -path "./.github/*" \
-            -printf "%p\n" | sort
+          find data -type f -print || true
 
-      # --------------------------------------------------
-      # 7. Create PDF automatically
-      # --------------------------------------------------
-      - name: Create PDF Report
-        run: |
-          python <<'PY'
-          import os
-          import glob
-          from reportlab.lib.pagesizes import A4
-          from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-          from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-          from reportlab.lib.enums import TA_CENTER
-          from reportlab.lib.units import inch
-          from datetime import datetime
+          echo "======================================"
+          echo "SUMMARY FILES"
+          echo "======================================"
 
-          print("Searching for generated TXT/JSON files...")
+          find summaries -type f -print || true
 
-          files = []
+          echo "======================================"
+          echo "REPORT FILES"
+          echo "======================================"
 
-          search_paths = [
-              "summaries/*.txt",
-              "output/*.txt",
-              "generated/*.txt",
-              "reports/*.txt",
-              "summaries/*.json",
-              "output/*.json",
-              "generated/*.json",
-              "reports/*.json"
-          ]
+          find reports -type f -print || true
 
-          for pattern in search_paths:
-              files.extend(glob.glob(pattern))
+      # ============================================
+      # UPLOAD PDF
+      # ============================================
 
-          files = sorted(
-              set(files),
-              key=lambda x: os.path.getmtime(x),
-              reverse=True
-          )
-
-          if not files:
-              print("No TXT or JSON report found.")
-              print("Creating fallback PDF.")
-
-              content = """
-              YouTube Trend Analysis
-
-              The analysis script completed successfully,
-              but no TXT or JSON output was found.
-
-              Please check src/app.py output paths.
-              """
-
-          else:
-              print("Files found:")
-              for f in files:
-                  print(" -", f)
-
-              latest_files = files[:10]
-
-              content_parts = []
-
-              for file_path in latest_files:
-                  try:
-                      with open(file_path, "r", encoding="utf-8") as f:
-                          data = f.read()
-
-                      content_parts.append(
-                          f"\n\nFILE: {file_path}\n\n{data}"
-                      )
-
-                  except Exception as e:
-                      content_parts.append(
-                          f"\n\nFILE: {file_path}\nERROR: {e}"
-                      )
-
-              content = "\n".join(content_parts)
-
-          # ------------------------------------------------
-          # PDF output
-          # ------------------------------------------------
-
-          os.makedirs("reports", exist_ok=True)
-
-          timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-          pdf_path = f"reports/youtube_trend_report_{timestamp}.pdf"
-
-          doc = SimpleDocTemplate(
-              pdf_path,
-              pagesize=A4,
-              rightMargin=40,
-              leftMargin=40,
-              topMargin=40,
-              bottomMargin=40
-          )
-
-          styles = getSampleStyleSheet()
-
-          title_style = ParagraphStyle(
-              "Title",
-              parent=styles["Title"],
-              alignment=TA_CENTER,
-              fontSize=18,
-              spaceAfter=20
-          )
-
-          body_style = ParagraphStyle(
-              "Body",
-              parent=styles["BodyText"],
-              fontSize=9,
-              leading=13,
-              spaceAfter=8
-          )
-
-          story = []
-
-          story.append(
-              Paragraph(
-                  "YouTube Trend Analysis Report",
-                  title_style
-              )
-          )
-
-          story.append(
-              Paragraph(
-                  datetime.now().strftime(
-                      "Generated: %Y-%m-%d %H:%M:%S"
-                  ),
-                  body_style
-              )
-          )
-
-          story.append(Spacer(1, 10))
-
-          # Convert plain text safely to PDF paragraphs
-          for line in content.splitlines():
-
-              line = line.strip()
-
-              if not line:
-                  story.append(Spacer(1, 6))
-                  continue
-
-              # Escape HTML characters
-              line = (
-                  line.replace("&", "&amp;")
-                      .replace("<", "&lt;")
-                      .replace(">", "&gt;")
-              )
-
-              story.append(
-                  Paragraph(line, body_style)
-              )
-
-          doc.build(story)
-
-          print("======================================")
-          print("PDF CREATED SUCCESSFULLY")
-          print(pdf_path)
-          print("======================================")
-
-          # Save path for next step
-          with open("pdf_path.txt", "w") as f:
-              f.write(pdf_path)
-          PY
-
-      # --------------------------------------------------
-      # 8. Verify PDF
-      # --------------------------------------------------
-      - name: Verify PDF
-        run: |
-          echo "Checking PDF..."
-
-          if [ ! -f pdf_path.txt ]; then
-            echo "ERROR: pdf_path.txt was not created."
-            exit 1
-          fi
-
-          PDF_FILE=$(cat pdf_path.txt)
-
-          echo "PDF: $PDF_FILE"
-
-          if [ ! -f "$PDF_FILE" ]; then
-            echo "ERROR: PDF does not exist."
-            exit 1
-          fi
-
-          echo "PDF exists."
-          ls -lh "$PDF_FILE"
-
-      # --------------------------------------------------
-      # 9. Upload PDF artifact
-      # --------------------------------------------------
       - name: Upload Generated PDF
         uses: actions/upload-artifact@v6
         with:
@@ -283,136 +126,3 @@ jobs:
           path: reports/*.pdf
           if-no-files-found: error
           retention-days: 7
-
-      # --------------------------------------------------
-      # 10. Send PDF through Gmail
-      # --------------------------------------------------
-      - name: Send PDF Email
-        run: |
-          python <<'PY'
-          import os
-          import smtplib
-          import ssl
-          from email.message import EmailMessage
-          from datetime import datetime
-
-          gmail_user = os.environ.get("GMAIL_USER")
-          gmail_to = os.environ.get("GMAIL_TO")
-          gmail_password = os.environ.get("GMAIL_APP_PASSWORD")
-
-          print("Checking Gmail configuration...")
-
-          if not gmail_user:
-              raise Exception("GMAIL_USER secret is missing")
-
-          if not gmail_to:
-              raise Exception("GMAIL_TO secret is missing")
-
-          if not gmail_password:
-              raise Exception("GMAIL_APP_PASSWORD secret is missing")
-
-          # Get PDF path
-          with open("pdf_path.txt", "r") as f:
-              pdf_path = f.read().strip()
-
-          if not os.path.exists(pdf_path):
-              raise Exception(
-                  f"PDF not found: {pdf_path}"
-              )
-
-          print("PDF found:", pdf_path)
-
-          # ----------------------------------------------
-          # Create email
-          # ----------------------------------------------
-
-          msg = EmailMessage()
-
-          msg["From"] = gmail_user
-          msg["To"] = gmail_to
-
-          msg["Subject"] = (
-              "YouTube Trend Analysis Report - "
-              + datetime.now().strftime("%Y-%m-%d %H:%M")
-          )
-
-          msg.set_content(
-              f"""
-          Hello,
-
-          Your YouTube Trend Analysis report has been generated successfully.
-
-          Generated:
-          {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-
-          The PDF report is attached.
-
-          Regards,
-          YouTube Trend Analysis AI
-          """
-          )
-
-          # ----------------------------------------------
-          # Attach PDF
-          # ----------------------------------------------
-
-          with open(pdf_path, "rb") as f:
-              pdf_data = f.read()
-
-          msg.add_attachment(
-              pdf_data,
-              maintype="application",
-              subtype="pdf",
-              filename=os.path.basename(pdf_path)
-          )
-
-          # ----------------------------------------------
-          # Gmail SMTP
-          # ----------------------------------------------
-
-          context = ssl.create_default_context()
-
-          print("Connecting to Gmail SMTP...")
-
-          with smtplib.SMTP(
-              "smtp.gmail.com",
-              587,
-              timeout=60
-          ) as server:
-
-              server.ehlo()
-
-              server.starttls(
-                  context=context
-              )
-
-              server.ehlo()
-
-              print("Logging into Gmail...")
-
-              server.login(
-                  gmail_user,
-                  gmail_password
-              )
-
-              print("Sending email...")
-
-              server.send_message(msg)
-
-          print("======================================")
-          print("EMAIL SENT SUCCESSFULLY")
-          print("To:", gmail_to)
-          print("PDF:", pdf_path)
-          print("======================================")
-          PY
-
-      # --------------------------------------------------
-      # 11. Final result
-      # --------------------------------------------------
-      - name: Final Status
-        run: |
-          echo "======================================"
-          echo "YOUTUBE TREND ANALYSIS COMPLETED"
-          echo "PDF CREATED"
-          echo "EMAIL SENT"
-          echo "======================================"

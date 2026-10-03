@@ -1,241 +1,662 @@
 import os
 import sys
 import json
+import glob
 import subprocess
+import smtplib
+import ssl
 from pathlib import Path
-from dotenv import load_dotenv
+from datetime import datetime
+from email.message import EmailMessage
+from xml.sax.saxutils import escape
 
 
 # ============================================================
 # PROJECT PATHS
 # ============================================================
 
-SRC_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SRC_DIR.parent
-
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SRC_DIR = PROJECT_ROOT / "src"
 DATA_DIR = PROJECT_ROOT / "data"
+SUMMARIES_DIR = PROJECT_ROOT / "summaries"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-TREND_FILE = DATA_DIR / "youtube_trends.json"
-IDEA_FILE = DATA_DIR / "content_ideas.json"
-PDF_FILE = REPORTS_DIR / "youtube_trend_report.pdf"
-
 
 # ============================================================
-# LOAD .ENV
+# HELPERS
 # ============================================================
 
-ENV_FILE = PROJECT_ROOT / ".env"
-
-if ENV_FILE.exists():
-    load_dotenv(ENV_FILE)
-    print(f"✓ .env loaded: {ENV_FILE}")
-
-else:
-    print("⚠ Project .env not found.")
-    print("Checking src/.env...")
-
-    SRC_ENV_FILE = SRC_DIR / ".env"
-
-    if SRC_ENV_FILE.exists():
-        load_dotenv(SRC_ENV_FILE)
-        print(f"✓ .env loaded: {SRC_ENV_FILE}")
-
-    else:
-        print("⚠ No .env file found.")
-        print("Using system environment variables.")
+def separator():
+    print("\n" + "=" * 80)
 
 
-# ============================================================
-# FIND SCRIPT
-# ============================================================
-
-def find_script(filename):
+def run_python_script(script_name):
     """
-    Find a Python script in common project locations.
+    Run another Python script from src/.
     """
 
-    possible_paths = [
-        SRC_DIR / filename,
-        PROJECT_ROOT / filename,
-    ]
+    script_path = SRC_DIR / script_name
 
-    for path in possible_paths:
-
-        if path.exists() and path.is_file():
-            return path
-
-    return None
-
-
-# ============================================================
-# RUN PYTHON SCRIPT
-# ============================================================
-
-def run_script(script_path, extra_env=None):
-
-    print()
-    print("=" * 80)
+    separator()
     print(f"RUNNING: {script_path}")
-    print("=" * 80)
+    separator()
 
-    environment = os.environ.copy()
+    if not script_path.exists():
+        print(f"ERROR: Script not found:")
+        print(script_path)
+        sys.exit(1)
 
-    if extra_env:
-        environment.update(extra_env)
-
-    try:
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(script_path)
-            ],
-            cwd=str(PROJECT_ROOT),
-            env=environment,
-            capture_output=True,
-            text=True
-        )
-
-    except Exception as e:
-
-        print()
-        print(f"❌ Could not start {script_path.name}")
-        print(f"Error: {e}")
-
-        return False
-
-    # Print normal output
-    if result.stdout:
-        print(result.stdout)
-
-    # Print errors
-    if result.stderr:
-        print()
-        print("ERROR OUTPUT:")
-        print(result.stderr)
-
-    if result.returncode != 0:
-
-        print()
-        print(
-            f"❌ {script_path.name} failed "
-            f"with exit code {result.returncode}"
-        )
-
-        return False
-
-    print()
-    print(
-        f"✓ {script_path.name} completed successfully."
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script_path)
+        ],
+        cwd=str(PROJECT_ROOT),
+        env=os.environ.copy()
     )
 
-    return True
+    if result.returncode != 0:
+        print()
+        print(f"ERROR: {script_name} failed.")
+        print(f"Exit code: {result.returncode}")
+        sys.exit(result.returncode)
+
+    print()
+    print(f"✓ {script_name} completed successfully.")
 
 
 # ============================================================
-# CHECK ENVIRONMENT
+# ENVIRONMENT
 # ============================================================
 
 def check_environment():
 
-    print()
-    print("=" * 80)
+    separator()
     print("CHECKING ENVIRONMENT VARIABLES")
-    print("=" * 80)
+    separator()
 
-    required = {
-        "YOUTUBE_API_KEY": os.getenv("YOUTUBE_API_KEY"),
-    }
+    variables = [
+        "YOUTUBE_API_KEY",
+        "OPENROUTER_API_KEY",
+        "GMAIL_USER",
+        "GMAIL_TO",
+        "GMAIL_APP_PASSWORD"
+    ]
 
-    optional = {
-        "GEMINI_API_KEY": os.getenv("GEMINI_API_KEY"),
-        "RESEND_API_KEY": os.getenv("RESEND_API_KEY"),
-        "FROM_EMAIL": os.getenv("FROM_EMAIL"),
-        "RECIPIENT_EMAIL": os.getenv("RECIPIENT_EMAIL"),
-    }
+    for name in variables:
 
-    failed = False
-
-    for name, value in required.items():
+        value = os.getenv(name)
 
         if value:
             print(f"✓ {name} found")
-
-        else:
-            print(f"❌ {name} NOT found")
-            failed = True
-
-    for name, value in optional.items():
-
-        if value:
-            print(f"✓ {name} found")
-
         else:
             print(f"⚠ {name} not found")
 
-    if failed:
-
-        print()
-        print("❌ Required environment variables are missing.")
-        return False
-
-    return True
-
 
 # ============================================================
-# FIND GENERATED PDF
+# FIND LATEST GENERATED IDEAS FILE
 # ============================================================
 
-def find_pdf():
+def find_latest_ideas_json():
 
-    # First check the expected location
-    if PDF_FILE.exists():
+    separator()
+    print("SEARCHING FOR GENERATED IDEA FILE")
+    separator()
 
-        if PDF_FILE.stat().st_size > 0:
-            return PDF_FILE
-
-    # Search other common folders
-    search_directories = [
-        PROJECT_ROOT,
-        REPORTS_DIR,
-        PROJECT_ROOT / "output",
-        PROJECT_ROOT / "generated",
-        PROJECT_ROOT / "pdf",
-        SRC_DIR,
+    patterns = [
+        str(SUMMARIES_DIR / "youtube_ideas_*.json"),
+        str(DATA_DIR / "youtube_ideas_*.json"),
+        str(PROJECT_ROOT / "youtube_ideas_*.json")
     ]
 
-    found = []
+    files = []
 
-    for directory in search_directories:
+    for pattern in patterns:
+        files.extend(glob.glob(pattern))
 
-        if not directory.exists():
-            continue
+    # Remove duplicates
+    files = list(set(files))
 
-        try:
+    if not files:
 
-            for pdf in directory.rglob("*.pdf"):
+        print("❌ No generated YouTube ideas JSON file found.")
 
-                if pdf.is_file() and pdf.stat().st_size > 0:
+        print()
+        print("Searched:")
 
-                    found.append(pdf)
+        for pattern in patterns:
+            print(pattern)
 
-        except Exception:
-            continue
-
-    if not found:
         return None
 
-    # Newest PDF
-    found.sort(
-        key=lambda p: p.stat().st_mtime,
+    # Newest file first
+    files.sort(
+        key=lambda file: os.path.getmtime(file),
         reverse=True
     )
 
-    return found[0]
+    latest_file = Path(files[0])
+
+    print("✓ Generated idea file found:")
+    print(f"  {latest_file}")
+
+    return latest_file
+
+
+# ============================================================
+# CREATE content_ideas.json
+# ============================================================
+
+def create_content_ideas():
+
+    separator()
+    print("CREATING CONTENT IDEAS FILE")
+    separator()
+
+    source_file = find_latest_ideas_json()
+
+    if source_file is None:
+        print("❌ Cannot create data/content_ideas.json")
+        sys.exit(1)
+
+    target_file = DATA_DIR / "content_ideas.json"
+
+    try:
+
+        # Validate JSON first
+        with open(
+            source_file,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
+            data = json.load(file)
+
+        # Save standard application file
+        with open(
+            target_file,
+            "w",
+            encoding="utf-8"
+        ) as file:
+
+            json.dump(
+                data,
+                file,
+                indent=2,
+                ensure_ascii=False
+            )
+
+        print("✓ Content ideas created successfully.")
+        print()
+        print(f"Source:")
+        print(source_file)
+        print()
+        print(f"Target:")
+        print(target_file)
+
+        return target_file
+
+    except json.JSONDecodeError as error:
+
+        print("❌ Generated JSON is invalid.")
+        print(error)
+
+        sys.exit(1)
+
+    except Exception as error:
+
+        print("❌ Failed to create content_ideas.json")
+        print(error)
+
+        sys.exit(1)
+
+
+# ============================================================
+# CREATE PDF
+# ============================================================
+
+def create_pdf():
+
+    separator()
+    print("CREATING PDF REPORT")
+    separator()
+
+    input_file = DATA_DIR / "content_ideas.json"
+
+    if not input_file.exists():
+
+        print("❌ content_ideas.json does not exist.")
+        return None
+
+    try:
+
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import (
+            SimpleDocTemplate,
+            Paragraph,
+            Spacer
+        )
+        from reportlab.lib.styles import (
+            getSampleStyleSheet,
+            ParagraphStyle
+        )
+        from reportlab.lib.enums import TA_CENTER
+
+    except ImportError:
+
+        print("❌ reportlab is not installed.")
+        print("Install it with:")
+        print("pip install reportlab")
+
+        return None
+
+    try:
+
+        with open(
+            input_file,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
+            data = json.load(file)
+
+    except Exception as error:
+
+        print("❌ Could not read JSON:")
+        print(error)
+
+        return None
+
+    timestamp = datetime.now().strftime(
+        "%Y%m%d_%H%M%S"
+    )
+
+    pdf_file = (
+        REPORTS_DIR /
+        f"youtube_trend_report_{timestamp}.pdf"
+    )
+
+    # --------------------------------------------------------
+    # PDF styles
+    # --------------------------------------------------------
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        alignment=TA_CENTER,
+        fontSize=18,
+        leading=22,
+        spaceAfter=20
+    )
+
+    heading_style = ParagraphStyle(
+        "Heading",
+        parent=styles["Heading2"],
+        fontSize=13,
+        leading=16,
+        spaceBefore=12,
+        spaceAfter=8
+    )
+
+    body_style = ParagraphStyle(
+        "Body",
+        parent=styles["BodyText"],
+        fontSize=9,
+        leading=13,
+        spaceAfter=5
+    )
+
+    # --------------------------------------------------------
+    # Document
+    # --------------------------------------------------------
+
+    document = SimpleDocTemplate(
+        str(pdf_file),
+        pagesize=A4,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40
+    )
+
+    story = []
+
+    story.append(
+        Paragraph(
+            "YouTube Trend Intelligence Report",
+            title_style
+        )
+    )
+
+    story.append(
+        Paragraph(
+            "Generated: "
+            + datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+            body_style
+        )
+    )
+
+    story.append(Spacer(1, 15))
+
+    # --------------------------------------------------------
+    # Convert JSON to readable PDF
+    # --------------------------------------------------------
+
+    if isinstance(data, dict):
+
+        for key, value in data.items():
+
+            story.append(
+                Paragraph(
+                    escape(str(key)),
+                    heading_style
+                )
+            )
+
+            if isinstance(value, list):
+
+                for index, item in enumerate(value, 1):
+
+                    story.append(
+                        Paragraph(
+                            f"<b>Item {index}</b>",
+                            body_style
+                        )
+                    )
+
+                    if isinstance(item, dict):
+
+                        for item_key, item_value in item.items():
+
+                            text = (
+                                f"<b>{escape(str(item_key))}:</b> "
+                                f"{escape(str(item_value))}"
+                            )
+
+                            story.append(
+                                Paragraph(
+                                    text,
+                                    body_style
+                                )
+                            )
+
+                    else:
+
+                        story.append(
+                            Paragraph(
+                                escape(str(item)),
+                                body_style
+                            )
+                        )
+
+                    story.append(
+                        Spacer(1, 8)
+                    )
+
+            elif isinstance(value, dict):
+
+                for item_key, item_value in value.items():
+
+                    text = (
+                        f"<b>{escape(str(item_key))}:</b> "
+                        f"{escape(str(item_value))}"
+                    )
+
+                    story.append(
+                        Paragraph(
+                            text,
+                            body_style
+                        )
+                    )
+
+            else:
+
+                story.append(
+                    Paragraph(
+                        escape(str(value)),
+                        body_style
+                    )
+                )
+
+    elif isinstance(data, list):
+
+        for index, item in enumerate(data, 1):
+
+            story.append(
+                Paragraph(
+                    f"Idea {index}",
+                    heading_style
+                )
+            )
+
+            if isinstance(item, dict):
+
+                for key, value in item.items():
+
+                    text = (
+                        f"<b>{escape(str(key))}:</b> "
+                        f"{escape(str(value))}"
+                    )
+
+                    story.append(
+                        Paragraph(
+                            text,
+                            body_style
+                        )
+                    )
+
+            else:
+
+                story.append(
+                    Paragraph(
+                        escape(str(item)),
+                        body_style
+                    )
+                )
+
+    else:
+
+        story.append(
+            Paragraph(
+                escape(str(data)),
+                body_style
+            )
+        )
+
+    # --------------------------------------------------------
+    # Build PDF
+    # --------------------------------------------------------
+
+    document.build(story)
+
+    if not pdf_file.exists():
+
+        print("❌ PDF was not created.")
+        return None
+
+    print()
+    print("✓ PDF CREATED SUCCESSFULLY")
+    print(f"  {pdf_file}")
+
+    return pdf_file
+
+
+# ============================================================
+# SEND EMAIL USING GMAIL SMTP
+# ============================================================
+
+def send_email(pdf_file):
+
+    separator()
+    print("SENDING EMAIL")
+    separator()
+
+    gmail_user = os.getenv("GMAIL_USER")
+    gmail_to = os.getenv("GMAIL_TO")
+    gmail_password = os.getenv("GMAIL_APP_PASSWORD")
+
+    # --------------------------------------------------------
+    # Check credentials
+    # --------------------------------------------------------
+
+    if not gmail_user:
+
+        print("❌ GMAIL_USER is missing.")
+        return False
+
+    if not gmail_to:
+
+        print("❌ GMAIL_TO is missing.")
+        return False
+
+    if not gmail_password:
+
+        print("❌ GMAIL_APP_PASSWORD is missing.")
+        return False
+
+    # --------------------------------------------------------
+    # Check PDF
+    # --------------------------------------------------------
+
+    if pdf_file is None:
+
+        print("❌ PDF file is missing.")
+        return False
+
+    pdf_file = Path(pdf_file)
+
+    if not pdf_file.exists():
+
+        print("❌ PDF does not exist:")
+        print(pdf_file)
+
+        return False
+
+    # --------------------------------------------------------
+    # Email
+    # --------------------------------------------------------
+
+    try:
+
+        message = EmailMessage()
+
+        message["From"] = gmail_user
+        message["To"] = gmail_to
+
+        message["Subject"] = (
+            "YouTube Trend Analysis Report - "
+            + datetime.now().strftime(
+                "%Y-%m-%d %H:%M"
+            )
+        )
+
+        message.set_content(
+            f"""
+Hello,
+
+Your YouTube Trend Intelligence report has been generated successfully.
+
+Generated:
+{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+The PDF report is attached.
+
+Regards,
+YouTube Trend Intelligence Generator
+"""
+        )
+
+        # ----------------------------------------------------
+        # Attach PDF
+        # ----------------------------------------------------
+
+        with open(
+            pdf_file,
+            "rb"
+        ) as file:
+
+            pdf_data = file.read()
+
+        message.add_attachment(
+            pdf_data,
+            maintype="application",
+            subtype="pdf",
+            filename=pdf_file.name
+        )
+
+        # ----------------------------------------------------
+        # Gmail SMTP
+        # ----------------------------------------------------
+
+        ssl_context = ssl.create_default_context()
+
+        print("Connecting to Gmail...")
+        print("SMTP server: smtp.gmail.com")
+        print("Port: 587")
+
+        with smtplib.SMTP(
+            "smtp.gmail.com",
+            587,
+            timeout=60
+        ) as server:
+
+            server.ehlo()
+
+            server.starttls(
+                context=ssl_context
+            )
+
+            server.ehlo()
+
+            print("Logging into Gmail...")
+
+            server.login(
+                gmail_user,
+                gmail_password
+            )
+
+            print("Sending email...")
+
+            server.send_message(
+                message
+            )
+
+        print()
+        print("✓ EMAIL SENT SUCCESSFULLY")
+        print(f"From: {gmail_user}")
+        print(f"To:   {gmail_to}")
+        print(f"PDF:  {pdf_file}")
+
+        return True
+
+    except smtplib.SMTPAuthenticationError:
+
+        print()
+        print("❌ GMAIL AUTHENTICATION FAILED")
+        print()
+        print("Check:")
+        print("1. GMAIL_USER")
+        print("2. GMAIL_APP_PASSWORD")
+        print("3. Gmail 2-Step Verification")
+        print("4. Use a Gmail App Password, NOT normal password")
+
+        return False
+
+    except Exception as error:
+
+        print()
+        print("❌ EMAIL FAILED")
+        print(f"Error: {error}")
+
+        return False
 
 
 # ============================================================
@@ -244,434 +665,160 @@ def find_pdf():
 
 def main():
 
-    print()
-    print("=" * 80)
-    print("YOUTUBE TREND INTELLIGENCE GENERATOR")
-    print("=" * 80)
+    separator()
 
-    print()
-    print(f"Project root : {PROJECT_ROOT}")
-    print(f"Source folder: {SRC_DIR}")
-    print(f"Data folder  : {DATA_DIR}")
+    print("YOUTUBE TREND INTELLIGENCE GENERATOR")
+
+    separator()
+
+    print(f"Project root  : {PROJECT_ROOT}")
+    print(f"Source folder : {SRC_DIR}")
+    print(f"Data folder   : {DATA_DIR}")
     print(f"Reports folder: {REPORTS_DIR}")
+    print(f"Summaries     : {SUMMARIES_DIR}")
+
+    separator()
 
     # ========================================================
     # ENVIRONMENT
     # ========================================================
 
-    if not check_environment():
-        sys.exit(1)
+    check_environment()
 
     # ========================================================
     # STEP 1
-    # YOUTUBE TREND COLLECTION
     # ========================================================
 
-    print()
-    print("=" * 80)
-    print("STEP 1 - FETCHING YOUTUBE TREND DATA")
-    print("=" * 80)
+    separator()
 
-    youtube_agent = find_script(
+    print("STEP 1 - FETCHING YOUTUBE TREND DATA")
+
+    separator()
+
+    run_python_script(
         "youtube_agent.py"
     )
 
-    if youtube_agent is None:
-
-        print()
-        print("❌ youtube_agent.py NOT FOUND")
-        print()
-        print("I checked:")
-        print(f"  {SRC_DIR / 'youtube_agent.py'}")
-        print(f"  {PROJECT_ROOT / 'youtube_agent.py'}")
-        print()
-        print("Put youtube_agent.py inside src/")
-        print("or inside the project root.")
-
-        sys.exit(1)
-
-    print(
-        f"✓ Found youtube_agent.py:"
-        f"\n  {youtube_agent}"
+    youtube_data = (
+        DATA_DIR /
+        "youtube_trends.json"
     )
 
-    youtube_success = run_script(
-        youtube_agent
-    )
+    if not youtube_data.exists():
 
-    if not youtube_success:
-
-        print()
-        print("❌ STEP 1 FAILED.")
-        print("Pipeline stopped.")
+        print("❌ YouTube trend data was not created:")
+        print(youtube_data)
 
         sys.exit(1)
-
-    # ========================================================
-    # CHECK TREND JSON
-    # ========================================================
 
     print()
-    print("=" * 80)
-    print("CHECKING TREND DATA")
-    print("=" * 80)
-
-    # Some youtube_agent versions may create the file
-    # in a different location.
-
-    possible_trend_files = [
-        TREND_FILE,
-        PROJECT_ROOT / "youtube_trends.json",
-        SRC_DIR / "youtube_trends.json",
-        DATA_DIR / "trends.json",
-    ]
-
-    actual_trend_file = None
-
-    for file in possible_trend_files:
-
-        if file.exists() and file.stat().st_size > 0:
-
-            actual_trend_file = file
-            break
-
-    if actual_trend_file is None:
-
-        print("⚠ youtube_trends.json was not found.")
-        print()
-        print("The youtube_agent.py output may be text-only.")
-
-        # Don't stop immediately because some versions of
-        # youtube_agent.py only print the trends.
-
-    else:
-
-        print(
-            f"✓ Trend data found:\n"
-            f"  {actual_trend_file}"
-        )
-
-        # Copy to standard location if necessary
-        if actual_trend_file != TREND_FILE:
-
-            import shutil
-
-            shutil.copy2(
-                actual_trend_file,
-                TREND_FILE
-            )
-
-            print(
-                f"✓ Copied trend data to:\n"
-                f"  {TREND_FILE}"
-            )
+    print("✓ Trend data found:")
+    print(youtube_data)
 
     # ========================================================
     # STEP 2
-    # IDEA GENERATOR
     # ========================================================
 
-    print()
-    print("=" * 80)
-    print("STEP 2 - GENERATING CONTENT IDEAS")
-    print("=" * 80)
+    separator()
 
-    idea_generator = find_script(
+    print("STEP 2 - GENERATING CONTENT IDEAS")
+
+    separator()
+
+    run_python_script(
         "idea_generator.py"
     )
 
-    if idea_generator is None:
-
-        print()
-        print("❌ idea_generator.py NOT FOUND")
-        print()
-        print(
-            f"Expected:\n"
-            f"  {SRC_DIR / 'idea_generator.py'}"
-        )
-
-        sys.exit(1)
-
-    # If trend JSON doesn't exist, idea generator cannot work.
-    if not TREND_FILE.exists():
-
-        print()
-        print("❌ Trend JSON file does not exist:")
-        print(TREND_FILE)
-        print()
-        print(
-            "Your youtube_agent.py needs to save the "
-            "trend data as youtube_trends.json."
-        )
-
-        sys.exit(1)
-
-    idea_success = run_script(
-        idea_generator,
-        {
-            "TREND_DATA_FILE": str(TREND_FILE),
-            "IDEA_OUTPUT_FILE": str(IDEA_FILE),
-        }
-    )
-
-    if not idea_success:
-
-        print()
-        print("❌ STEP 2 FAILED.")
-        print("Pipeline stopped.")
-
-        sys.exit(1)
-
     # ========================================================
-    # CHECK IDEA FILE
+    # IMPORTANT FIX
+    # ========================================================
+    #
+    # idea_generator.py creates:
+    #
+    # summaries/youtube_ideas_YYYYMMDD_HHMMSS.json
+    #
+    # But old app.py expects:
+    #
+    # data/content_ideas.json
+    #
+    # We now automatically create the expected file.
     # ========================================================
 
-    if not IDEA_FILE.exists():
+    content_ideas = create_content_ideas()
 
-        print()
-        print("❌ idea_generator.py completed but")
-        print("did not create:")
-        print(IDEA_FILE)
+    if not content_ideas.exists():
+
+        print("❌ content_ideas.json was not created.")
 
         sys.exit(1)
-
-    print(
-        f"✓ Content ideas file found:\n"
-        f"  {IDEA_FILE}"
-    )
 
     # ========================================================
     # STEP 3
-    # PDF GENERATION
     # ========================================================
 
-    print()
-    print("=" * 80)
-    print("STEP 3 - CREATING PROFESSIONAL PDF REPORT")
-    print("=" * 80)
+    separator()
 
-    pdf_generator = PROJECT_ROOT / "PDF_Generator.py"
+    print("STEP 3 - CREATING PDF")
 
-    if not pdf_generator.exists():
+    separator()
 
-        pdf_generator = SRC_DIR / "PDF_Generator.py"
+    pdf_file = create_pdf()
 
-    if not pdf_generator.exists():
+    if pdf_file is None:
 
-        print()
-        print("❌ PDF_Generator.py NOT FOUND")
-        print()
-        print("Expected either:")
-        print(
-            f"  {PROJECT_ROOT / 'PDF_Generator.py'}"
-        )
-        print(
-            f"  {SRC_DIR / 'PDF_Generator.py'}"
-        )
+        print("❌ PDF creation failed.")
 
         sys.exit(1)
-
-    # Delete old PDF
-    if PDF_FILE.exists():
-
-        try:
-            PDF_FILE.unlink()
-            print("✓ Removed old PDF")
-
-        except Exception as e:
-
-            print(
-                f"⚠ Could not remove old PDF: {e}"
-            )
-
-    pdf_success = run_script(
-        pdf_generator,
-        {
-            "TREND_DATA_FILE": str(TREND_FILE),
-            "IDEA_DATA_FILE": str(IDEA_FILE),
-            "PDF_OUTPUT_FILE": str(PDF_FILE),
-        }
-    )
-
-    if not pdf_success:
-
-        print()
-        print("❌ STEP 3 FAILED.")
-        sys.exit(1)
-
-    # ========================================================
-    # FIND PDF
-    # ========================================================
-
-    print()
-    print("=" * 80)
-    print("SEARCHING FOR GENERATED PDF")
-    print("=" * 80)
-
-    generated_pdf = find_pdf()
-
-    if generated_pdf is None:
-
-        print()
-        print("❌ NO PDF FOUND.")
-
-        print()
-        print("Expected:")
-        print(
-            f"  {PDF_FILE}"
-        )
-
-        print()
-        print("Searched:")
-        print(
-            f"  {PROJECT_ROOT}"
-        )
-        print(
-            f"  {REPORTS_DIR}"
-        )
-        print(
-            f"  {PROJECT_ROOT / 'output'}"
-        )
-        print(
-            f"  {PROJECT_ROOT / 'generated'}"
-        )
-        print(
-            f"  {PROJECT_ROOT / 'pdf'}"
-        )
-        print(
-            f"  {SRC_DIR}"
-        )
-
-        sys.exit(1)
-
-    # ========================================================
-    # STANDARDIZE PDF LOCATION
-    # ========================================================
-
-    if generated_pdf.resolve() != PDF_FILE.resolve():
-
-        import shutil
-
-        print()
-        print(
-            f"PDF found elsewhere:\n"
-            f"  {generated_pdf}"
-        )
-
-        shutil.copy2(
-            generated_pdf,
-            PDF_FILE
-        )
-
-        generated_pdf = PDF_FILE
-
-        print(
-            f"✓ PDF copied to:\n"
-            f"  {PDF_FILE}"
-        )
-
-    # ========================================================
-    # PDF SUCCESS
-    # ========================================================
-
-    print()
-    print("=" * 80)
-    print("PDF GENERATED SUCCESSFULLY")
-    print("=" * 80)
-
-    print(
-        f"✓ PDF: {generated_pdf}"
-    )
-
-    print(
-        f"✓ Size: "
-        f"{generated_pdf.stat().st_size:,} bytes"
-    )
 
     # ========================================================
     # STEP 4
-    # EMAIL
     # ========================================================
 
-    sender = SRC_DIR / "sender.py"
+    separator()
 
-    if not sender.exists():
-        sender = PROJECT_ROOT / "sender.py"
+    print("STEP 4 - SENDING EMAIL")
 
-    if sender.exists():
+    separator()
 
-        print()
-        print("=" * 80)
-        print("STEP 4 - SENDING EMAIL")
-        print("=" * 80)
+    email_sent = send_email(
+        pdf_file
+    )
 
-        email_success = run_script(
-            sender,
-            {
-                "PDF_FILE": str(generated_pdf),
-                "REPORT_PDF": str(generated_pdf),
-            }
-        )
+    # Email failure does not delete the PDF.
+    # GitHub Actions can still upload the PDF artifact.
 
-        if email_success:
-
-            print()
-            print("✓ EMAIL SENT SUCCESSFULLY")
-
-        else:
-
-            print()
-            print(
-                "⚠ EMAIL FAILED."
-            )
-
-            print(
-                "The PDF was generated successfully, "
-                "so the pipeline will not delete it."
-            )
-
-    else:
+    if not email_sent:
 
         print()
         print(
-            "⚠ sender.py not found."
-        )
-
-        print(
-            "Skipping email step."
+            "⚠ PDF was created successfully, "
+            "but email was not sent."
         )
 
     # ========================================================
     # FINAL
     # ========================================================
 
-    print()
-    print("=" * 80)
-    print("🎉 PIPELINE COMPLETED")
-    print("=" * 80)
+    separator()
+
+    print("GENERATION COMPLETED SUCCESSFULLY")
+
+    separator()
 
     print()
-    print("Files generated:")
+    print("OUTPUT FILES")
+    print("------------------------------")
+    print(f"✓ {youtube_data}")
+    print(f"✓ {content_ideas}")
+    print(f"✓ {pdf_file}")
 
-    print(
-        f"✓ Trends : {TREND_FILE}"
-    )
+    if email_sent:
+        print("✓ Email sent")
+    else:
+        print("⚠ Email not sent")
 
-    print(
-        f"✓ Ideas  : {IDEA_FILE}"
-    )
+    separator()
 
-    print(
-        f"✓ PDF    : {generated_pdf}"
-    )
-
-    print()
-    print("=" * 80)
-
-
-# ============================================================
-# START
-# ============================================================
 
 if __name__ == "__main__":
     main()

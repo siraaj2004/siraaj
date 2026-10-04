@@ -1,57 +1,176 @@
 name: YouTube High CTR Idea Generator
 
 on:
-  workflow_dispatch:
+  # Run every hour at minute 30
+  # Example: 8:30, 9:30, 10:30, 11:30...
   schedule:
-    - cron: "0 * * * *"
+    - cron: "30 * * * *"
+
+  # Allow manual run from GitHub Actions
+  workflow_dispatch:
 
 jobs:
-  generate:
-    runs-on: ubuntu-latest
+  generate-and-email:
+    runs-on: ubuntu-24.04
 
     steps:
+
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # ============================================================
+      # PYTHON
+      # ============================================================
 
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
+      # ============================================================
+      # INSTALL
+      # ============================================================
+
       - name: Install dependencies
+        shell: bash
         run: |
+          set -euxo pipefail
+
+          python --version
+          python -m pip --version
+
           python -m pip install --upgrade pip
-          pip install requests reportlab
 
-      - name: Run YouTube High CTR Generator
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          fi
+
+          python -m pip install requests python-dotenv
+
+      # ============================================================
+      # CHECK SECRETS
+      # ============================================================
+
+      - name: Check required secrets
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          OPENROUTER_MODEL: ${{ secrets.OPENROUTER_MODEL }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          GMAIL_TO: ${{ secrets.GMAIL_TO }}
+        shell: bash
         run: |
+          set -e
+
           echo "=============================================="
+          echo "CHECKING SECRETS"
+          echo "=============================================="
+
+          test -n "$YOUTUBE_API_KEY" || {
+            echo "ERROR: YOUTUBE_API_KEY missing"
+            exit 1
+          }
+
+          test -n "$OPENROUTER_API_KEY" || {
+            echo "ERROR: OPENROUTER_API_KEY missing"
+            exit 1
+          }
+
+          test -n "$GMAIL_USER" || {
+            echo "ERROR: GMAIL_USER missing"
+            exit 1
+          }
+
+          test -n "$GMAIL_APP_PASSWORD" || {
+            echo "ERROR: GMAIL_APP_PASSWORD missing"
+            exit 1
+          }
+
+          test -n "$GMAIL_TO" || {
+            echo "ERROR: GMAIL_TO missing"
+            exit 1
+          }
+
+          echo "All required secrets are available."
+
+      # ============================================================
+      # GENERATE IDEAS
+      # ============================================================
+
+      - name: Generate YouTube High CTR Ideas
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+          OPENROUTER_MODEL: openrouter/free
+
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "======================================================================"
           echo "STARTING YOUTUBE HIGH CTR IDEA GENERATOR"
-          echo "=============================================="
-          python src/app.py
+          echo "======================================================================"
 
-      - name: Show generated files
-        if: always()
+          python main.py
+
+          echo ""
+          echo "======================================================================"
+          echo "CHECKING RESULT"
+          echo "======================================================================"
+
+          if [ ! -f "data/youtube_high_ctr_ideas.json" ]; then
+            echo "ERROR: Result file was not created."
+            exit 1
+          fi
+
+          echo "SUCCESS:"
+          ls -lh data/youtube_high_ctr_ideas.json
+
+      # ============================================================
+      # SEND EMAIL
+      # ============================================================
+
+      - name: Send YouTube Ideas Email
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GMAIL_TO: ${{ secrets.GMAIL_TO }}
+
+          EMAIL_SUBJECT: "🔥 YouTube High CTR Ideas - Hourly"
+
+          YOUTUBE_RESULT_FILE: "data/youtube_high_ctr_ideas.json"
+
+        shell: bash
         run: |
-          echo "=============================================="
-          echo "GENERATED FILES"
-          echo "=============================================="
-          find data reports -maxdepth 2 -type f -print 2>/dev/null | sort || true
+          set -euxo pipefail
 
-      - name: Upload results
+          echo "======================================================================"
+          echo "SENDING EMAIL"
+          echo "======================================================================"
+
+          python gmail_sender.py
+
+          echo ""
+          echo "======================================================================"
+          echo "EMAIL SENT SUCCESSFULLY"
+          echo "======================================================================"
+
+      # ============================================================
+      # UPLOAD RESULT
+      # ============================================================
+
+      - name: Upload generated JSON
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-high-ctr-results
-          path: |
-            data/youtube_high_ctr_ideas.json
-            reports/*.pdf
-            reports/*.txt
-          if-no-files-found: warn
+          name: youtube-high-ctr-results-${{ github.run_number }}
+          path: data/youtube_high_ctr_ideas.json
+          if-no-files-found: error
+          retention-days: 7

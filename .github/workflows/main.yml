@@ -19,8 +19,10 @@ jobs:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-      RESEND_FROM: ${{ secrets.RESEND_FROM }}
-      OPENROUTER_MODEL: ${{ secrets.OPENROUTER_MODEL }}
+
+      OPENROUTER_MODEL: openrouter/auto
+
+      RESEND_FROM: onboarding@resend.dev
 
     steps:
 
@@ -42,9 +44,10 @@ jobs:
           echo "=============================================="
           echo "STARTING YOUTUBE HIGH CTR IDEA GENERATOR"
           echo "=============================================="
+
           python src/app.py
 
-      - name: Upload PDF
+      - name: Upload generated PDF
         if: success()
         uses: actions/upload-artifact@v4
         with:

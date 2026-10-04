@@ -1,380 +1,135 @@
 import os
-import json
+import sys
 import smtplib
-import ssl
 from pathlib import Path
 from email.message import EmailMessage
-from email.utils import formataddr
 
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
+def send_email_with_attachment(
+    sender,
+    app_password,
+    recipient,
+    subject,
+    body,
+    attachment_path
+):
+    attachment = Path(attachment_path)
 
-REPORT_FILE = Path("data/youtube_high_ctr_ideas.json")
-
-GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS", "").strip()
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "").strip()
-RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL", "").strip()
-
-
-# ============================================================
-# VALIDATION
-# ============================================================
-
-def check_email_config():
-
-    missing = []
-
-    if not GMAIL_ADDRESS:
-        missing.append("GMAIL_ADDRESS")
-
-    if not GMAIL_APP_PASSWORD:
-        missing.append("GMAIL_APP_PASSWORD")
-
-    if not RECIPIENT_EMAIL:
-        missing.append("RECIPIENT_EMAIL")
-
-    if missing:
-        print("=" * 70)
-        print("EMAIL CONFIGURATION ERROR")
-        print("=" * 70)
-
-        for item in missing:
-            print("Missing:", item)
-
-        return False
-
-    return True
-
-
-# ============================================================
-# CREATE EMAIL CONTENT
-# ============================================================
-
-def create_email_content(data):
-
-    ideas = data.get("ideas", {})
-
-    best = ideas.get("high_ctr_idea", {})
-
-    shorts = ideas.get("current_shorts", [])
-
-    generated_at = data.get(
-        "generated_at",
-        "Unknown"
-    )
-
-    india_count = data.get(
-        "india_trending_count",
-        0
-    )
-
-    worldwide_count = data.get(
-        "worldwide_trending_count",
-        0
-    )
-
-    subject = (
-        "YouTube High CTR Ideas | "
-        + best.get(
-            "title",
-            "New Ideas Generated"
-        )
-    )
-
-    html = f"""
-<html>
-<body>
-
-<h2>YouTube High CTR Idea Generator</h2>
-
-<p>
-<b>Generated:</b> {generated_at}
-</p>
-
-<p>
-<b>India trending videos:</b> {india_count}<br>
-<b>Worldwide trending videos:</b> {worldwide_count}
-</p>
-
-<hr>
-
-<h2>🔥 HIGH CTR IDEA</h2>
-
-<p>
-<b>Title:</b><br>
-{best.get("title", "")}
-</p>
-
-<p>
-<b>Genre:</b><br>
-{best.get("genre", "")}
-</p>
-
-<p>
-<b>English Logline:</b><br>
-{best.get("english_logline", "")}
-</p>
-
-<p>
-<b>Roman Telugu Logline:</b><br>
-{best.get("roman_telugu_logline", "")}
-</p>
-
-<p>
-<b>Hook:</b><br>
-{best.get("hook", "")}
-</p>
-
-<p>
-<b>Why This Is Best:</b><br>
-{best.get("why_this_is_best", "")}
-</p>
-
-<hr>
-
-<h2>🎬 CURRENT YOUTUBE SHORTS</h2>
-"""
-
-    for index, idea in enumerate(shorts, start=1):
-
-        html += f"""
-<h3>{index}. {idea.get("title", "")}</h3>
-
-<p>
-<b>Genre:</b>
-{idea.get("genre", "")}
-</p>
-
-<p>
-<b>English Logline:</b><br>
-{idea.get("english_logline", "")}
-</p>
-
-<p>
-<b>Roman Telugu Logline:</b><br>
-{idea.get("roman_telugu_logline", "")}
-</p>
-
-<p>
-<b>Hook:</b><br>
-{idea.get("hook", "")}
-</p>
-
-<p>
-<b>Content Summary:</b><br>
-{idea.get("content_summary", "")}
-</p>
-"""
-
-    html += """
-<hr>
-
-<p>
-The complete JSON report is attached to this email.
-</p>
-
-<p>
-YouTube High CTR Idea Generator
-</p>
-
-</body>
-</html>
-"""
-
-    return subject, html
-
-
-# ============================================================
-# SEND EMAIL
-# ============================================================
-
-def send_email():
-
-    print()
-    print("=" * 70)
-    print("STARTING EMAIL DELIVERY")
-    print("=" * 70)
-
-    if not check_email_config():
-
-        raise RuntimeError(
-            "Email configuration is incomplete."
-        )
-
-    if not REPORT_FILE.exists():
-
+    if not attachment.exists():
         raise FileNotFoundError(
-            f"Report file not found: {REPORT_FILE}"
+            f"Attachment not found: {attachment.resolve()}"
         )
 
-    print("Report found:", REPORT_FILE)
+    if not sender:
+        raise ValueError("GMAIL_USER is missing")
 
-    # --------------------------------------------------------
-    # LOAD JSON
-    # --------------------------------------------------------
+    if not app_password:
+        raise ValueError("GMAIL_APP_PASSWORD is missing")
 
-    try:
+    if not recipient:
+        raise ValueError("GMAIL_TO is missing")
 
-        with open(
-            REPORT_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
+    print("=" * 70)
+    print("GMAIL EMAIL SENDING")
+    print("=" * 70)
 
-            data = json.load(file)
+    print(f"From      : {sender}")
+    print(f"To        : {recipient}")
+    print(f"Subject   : {subject}")
+    print(f"Attachment: {attachment}")
+    print()
 
-    except Exception as exc:
+    msg = EmailMessage()
 
-        raise RuntimeError(
-            f"Could not read JSON report: {exc}"
-        )
+    msg["From"] = sender
+    msg["To"] = recipient
+    msg["Subject"] = subject
 
-    # --------------------------------------------------------
-    # CREATE EMAIL
-    # --------------------------------------------------------
+    msg.set_content(body)
 
-    subject, html = create_email_content(data)
+    with open(attachment, "rb") as f:
+        file_data = f.read()
 
-    message = EmailMessage()
-
-    message["From"] = formataddr(
-        (
-            "YouTube High CTR Generator",
-            GMAIL_ADDRESS
-        )
-    )
-
-    message["To"] = RECIPIENT_EMAIL
-
-    message["Subject"] = subject
-
-    message.set_content(
-        "Your YouTube High CTR report is ready."
-    )
-
-    message.add_alternative(
-        html,
-        subtype="html"
-    )
-
-    # --------------------------------------------------------
-    # ATTACH JSON
-    # --------------------------------------------------------
-
-    with open(
-        REPORT_FILE,
-        "rb"
-    ) as file:
-
-        file_data = file.read()
-
-    message.add_attachment(
+    msg.add_attachment(
         file_data,
         maintype="application",
         subtype="json",
-        filename=REPORT_FILE.name
+        filename=attachment.name
     )
-
-    # --------------------------------------------------------
-    # GMAIL SMTP
-    # --------------------------------------------------------
 
     print("Connecting to Gmail SMTP...")
 
-    context = ssl.create_default_context()
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as smtp:
+        smtp.ehlo()
+
+        print("Starting TLS...")
+        smtp.starttls()
+
+        smtp.ehlo()
+
+        print("Logging into Gmail...")
+        smtp.login(sender, app_password)
+
+        print("Sending email...")
+        smtp.send_message(msg)
+
+    print()
+    print("EMAIL SENT SUCCESSFULLY")
+    print("=" * 70)
+
+
+def main():
+    sender = os.environ.get("GMAIL_USER", "").strip()
+    app_password = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
+    recipient = os.environ.get("GMAIL_TO", "").strip()
+
+    attachment = os.environ.get(
+        "YOUTUBE_RESULT_FILE",
+        "data/youtube_high_ctr_ideas.json"
+    )
+
+    subject = os.environ.get(
+        "EMAIL_SUBJECT",
+        "YouTube High CTR Ideas"
+    )
+
+    body = """Hi Siraaj,
+
+Your YouTube High CTR Idea Generator has completed successfully.
+
+The generated YouTube ideas are attached as:
+
+youtube_high_ctr_ideas.json
+
+The generator collected:
+- India YouTube trends
+- Worldwide/US proxy trends
+- Monetization strategy
+- High CTR video ideas
+
+Regards,
+YouTube AI Automation
+"""
 
     try:
+        send_email_with_attachment(
+            sender=sender,
+            app_password=app_password,
+            recipient=recipient,
+            subject=subject,
+            body=body,
+            attachment_path=attachment
+        )
 
-        with smtplib.SMTP(
-            "smtp.gmail.com",
-            587,
-            timeout=60
-        ) as server:
-
-            server.ehlo()
-
-            server.starttls(
-                context=context
-            )
-
-            server.ehlo()
-
-            print("Logging into Gmail...")
-
-            server.login(
-                GMAIL_ADDRESS,
-                GMAIL_APP_PASSWORD
-            )
-
-            print("Sending email...")
-
-            server.send_message(
-                message
-            )
-
+    except Exception as e:
         print()
         print("=" * 70)
-        print("EMAIL SENT SUCCESSFULLY")
+        print("EMAIL FAILED")
         print("=" * 70)
-
-        print(
-            "From:",
-            GMAIL_ADDRESS
-        )
-
-        print(
-            "To:",
-            RECIPIENT_EMAIL
-        )
-
-        print(
-            "Subject:",
-            subject
-        )
-
+        print(f"ERROR: {type(e).__name__}: {e}")
         print("=" * 70)
+        sys.exit(1)
 
-        return True
-
-    except smtplib.SMTPAuthenticationError as exc:
-
-        print()
-        print("=" * 70)
-        print("GMAIL AUTHENTICATION FAILED")
-        print("=" * 70)
-
-        print(exc)
-
-        print()
-        print(
-            "Use a Gmail App Password."
-        )
-
-        print(
-            "Do NOT use your normal Gmail password."
-        )
-
-        raise
-
-    except Exception as exc:
-
-        print()
-        print("=" * 70)
-        print("EMAIL SEND FAILED")
-        print("=" * 70)
-
-        print(type(exc).__name__)
-        print(str(exc))
-
-        raise
-
-
-# ============================================================
-# MAIN
-# ============================================================
 
 if __name__ == "__main__":
-
-    send_email()
+    main()

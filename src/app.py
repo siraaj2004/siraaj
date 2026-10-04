@@ -1,18 +1,20 @@
-import os
-import sys
 import json
-from pathlib import Path
+import os
+import smtplib
+import ssl
+import sys
+import traceback
 from datetime import datetime
+from email.message import EmailMessage
+from pathlib import Path
 
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    load_dotenv = None
-
-try:
-    import requests
-except ImportError:
-    requests = None
+import requests
+from dotenv import load_dotenv
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 
 # ============================================================
@@ -20,469 +22,635 @@ except ImportError:
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-SRC_DIR = BASE_DIR / "src"
+
 DATA_DIR = BASE_DIR / "data"
 REPORTS_DIR = BASE_DIR / "reports"
 SUMMARIES_DIR = BASE_DIR / "summaries"
 
-DATA_DIR.mkdir(exist_ok=True)
-REPORTS_DIR.mkdir(exist_ok=True)
-SUMMARIES_DIR.mkdir(exist_ok=True)
+ENV_FILE = BASE_DIR / ".env"
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================
 # LOAD ENVIRONMENT
 # ============================================================
 
-ENV_FILE = BASE_DIR / ".env"
-
-if load_dotenv:
-    if ENV_FILE.exists():
-        load_dotenv(ENV_FILE)
-    else:
-        print("⚠ Project .env not found.")
-        print("Using GitHub Actions environment variables.")
+if ENV_FILE.exists():
+    print("✓ Project .env found.")
+    load_dotenv(ENV_FILE)
+else:
+    print("⚠ Project .env not found.")
+    print("Using GitHub Actions environment variables.")
 
 
 # ============================================================
-# CONFIGURATION
+# ENVIRONMENT VARIABLES
 # ============================================================
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_TO = os.getenv("GMAIL_TO")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 
 
-# Gemini is intentionally NOT required.
-# This project now uses OpenRouter for AI generation.
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
-OPENROUTER_MODEL = os.getenv(
-    "OPENROUTER_MODEL",
-    "openai/gpt-oss-20b:free"
-)
+GEMINI_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+]
+
+YOUTUBE_REGION = "IN"
+YOUTUBE_CATEGORY = "10"
+MAX_RESULTS = 50
+REQUEST_TIMEOUT = 60
 
 
 # ============================================================
-# PRINT HEADER
+# ENVIRONMENT CHECK
 # ============================================================
 
-print()
-print("=" * 60)
-print("YOUTUBE TREND INTELLIGENCE")
-print("=" * 60)
-print()
+def check_environment():
+    print()
+    print("=" * 60)
+    print("ENVIRONMENT CHECK")
+    print("=" * 60)
 
-print(f"Project root : {BASE_DIR}")
-print(f"Source folder: {SRC_DIR}")
-print(f"Data folder  : {DATA_DIR}")
-print(f"Reports      : {REPORTS_DIR}")
-print(f"Summaries    : {SUMMARIES_DIR}")
-print()
+    required = {
+        "YOUTUBE_API_KEY": YOUTUBE_API_KEY,
+        "GEMINI_API_KEY": GEMINI_API_KEY,
+        "GMAIL_USER": GMAIL_USER,
+        "GMAIL_TO": GMAIL_TO,
+        "GMAIL_APP_PASSWORD": GMAIL_APP_PASSWORD,
+    }
 
+    missing = []
 
-# ============================================================
-# CHECK ENVIRONMENT VARIABLES
-# ============================================================
-
-print("Checking environment variables...")
-print()
-
-missing = []
-
-
-def check_env(name, value, required=True):
-    if value:
-        print(f"✓ {name} found")
-    else:
-        print(f"✗ {name} is missing")
-        if required:
+    for name, value in required.items():
+        if value:
+            print(f"✓ {name} found")
+        else:
+            print(f"✗ {name} missing")
             missing.append(name)
 
+    if missing:
+        raise RuntimeError(
+            "Missing environment variables: "
+            + ", ".join(missing)
+        )
 
-check_env("YOUTUBE_API_KEY", YOUTUBE_API_KEY)
-
-# IMPORTANT:
-# Gemini is NOT required anymore.
-check_env("OPENROUTER_API_KEY", OPENROUTER_API_KEY)
-
-check_env("GMAIL_USER", GMAIL_USER)
-check_env("GMAIL_TO", GMAIL_TO)
-check_env("GMAIL_APP_PASSWORD", GMAIL_APP_PASSWORD)
+    print()
+    print("ENVIRONMENT CHECK PASSED")
 
 
 # ============================================================
-# STOP ONLY IF ACTUALLY REQUIRED VARIABLES ARE MISSING
+# COLLECT YOUTUBE TRENDING VIDEOS
 # ============================================================
 
-if missing:
+def get_youtube_trending_videos():
     print()
     print("=" * 60)
-    print("ERROR: REQUIRED ENVIRONMENT VARIABLES ARE MISSING")
+    print("COLLECTING YOUTUBE TRENDING VIDEOS")
     print("=" * 60)
-
-    for item in missing:
-        print(f"  - {item}")
-
-    print()
-    print("Add these values to GitHub Repository Secrets.")
-    print()
-
-    sys.exit(1)
-
-
-print()
-print("=" * 60)
-print("ENVIRONMENT CHECK PASSED")
-print("=" * 60)
-print()
-
-
-# ============================================================
-# OPENROUTER AI
-# ============================================================
-
-def ask_openrouter(prompt):
-    """
-    Send prompt to OpenRouter and return AI response.
-    """
-
-    if not OPENROUTER_API_KEY:
-        raise RuntimeError("OPENROUTER_API_KEY is missing.")
-
-    if requests is None:
-        raise RuntimeError(
-            "requests package is not installed. "
-            "Run: pip install requests"
-        )
-
-    url = "https://openrouter.ai/api/v1/chat/completions"
-
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/",
-        "X-Title": "YouTube Trend Intelligence"
-    }
-
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a YouTube trend intelligence analyst. "
-                    "Analyze YouTube trend data and generate practical "
-                    "video ideas for an Indian/Telugu creator."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "temperature": 0.7,
-        "max_tokens": 4000
-    }
-
-    response = requests.post(
-        url,
-        headers=headers,
-        json=payload,
-        timeout=120
-    )
-
-    print(f"OpenRouter HTTP status: {response.status_code}")
-
-    if response.status_code != 200:
-        print("OpenRouter response:")
-        print(response.text[:2000])
-
-        raise RuntimeError(
-            f"OpenRouter API failed with HTTP {response.status_code}"
-        )
-
-    result = response.json()
-
-    try:
-        return result["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        print("Unexpected OpenRouter response:")
-        print(json.dumps(result, indent=2)[:4000])
-
-        raise RuntimeError(
-            "Could not extract AI response from OpenRouter."
-        )
-
-
-# ============================================================
-# YOUTUBE API
-# ============================================================
-
-def get_youtube_trending_videos(region_code="IN", max_results=50):
-
-    if requests is None:
-        raise RuntimeError("requests package is not installed.")
 
     url = "https://www.googleapis.com/youtube/v3/videos"
 
     params = {
         "part": "snippet,statistics,contentDetails",
         "chart": "mostPopular",
-        "regionCode": region_code,
-        "maxResults": max_results,
-        "key": YOUTUBE_API_KEY
+        "regionCode": YOUTUBE_REGION,
+        "videoCategoryId": YOUTUBE_CATEGORY,
+        "maxResults": MAX_RESULTS,
+        "key": YOUTUBE_API_KEY,
     }
 
     response = requests.get(
         url,
         params=params,
-        timeout=60
+        timeout=REQUEST_TIMEOUT,
     )
 
-    print(f"YouTube API HTTP status: {response.status_code}")
+    print(
+        f"YouTube API HTTP status: "
+        f"{response.status_code}"
+    )
 
     if response.status_code != 200:
-        print(response.text[:2000])
+        print("YouTube response:")
+        print(response.text)
 
         raise RuntimeError(
-            f"YouTube API failed with HTTP {response.status_code}"
+            f"YouTube API failed with HTTP "
+            f"{response.status_code}"
         )
 
-    return response.json()
+    data = response.json()
 
+    videos = []
 
-# ============================================================
-# SAVE JSON DATA
-# ============================================================
+    for item in data.get("items", []):
+        snippet = item.get("snippet", {})
+        statistics = item.get("statistics", {})
 
-def save_json(data, filename):
+        video_id = item.get("id")
 
-    path = DATA_DIR / filename
+        videos.append({
+            "video_id": video_id,
+            "title": snippet.get(
+                "title",
+                "Unknown Title",
+            ),
+            "channel": snippet.get(
+                "channelTitle",
+                "Unknown Channel",
+            ),
+            "published_at": snippet.get(
+                "publishedAt",
+                "",
+            ),
+            "description": snippet.get(
+                "description",
+                "",
+            )[:1000],
+            "tags": snippet.get(
+                "tags",
+                [],
+            )[:20],
+            "views": int(
+                statistics.get(
+                    "viewCount",
+                    0,
+                )
+            ),
+            "likes": int(
+                statistics.get(
+                    "likeCount",
+                    0,
+                )
+            ),
+            "comments": int(
+                statistics.get(
+                    "commentCount",
+                    0,
+                )
+            ),
+            "url": (
+                "https://www.youtube.com/watch?v="
+                f"{video_id}"
+            ),
+        })
+
+    print(
+        f"✓ Collected {len(videos)} trending videos"
+    )
+
+    raw_file = DATA_DIR / "youtube_trending_raw.json"
 
     with open(
-        path,
+        raw_file,
         "w",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as file:
-
         json.dump(
             data,
             file,
             indent=2,
-            ensure_ascii=False
+            ensure_ascii=False,
         )
 
-    print(f"✓ Saved: {path}")
+    print(f"✓ Saved: {raw_file}")
 
-    return path
+    processed_file = (
+        DATA_DIR / "youtube_trending_processed.json"
+    )
 
+    with open(
+        processed_file,
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            videos,
+            file,
+            indent=2,
+            ensure_ascii=False,
+        )
 
-# ============================================================
-# FORMAT TREND DATA FOR AI
-# ============================================================
-
-def prepare_trend_data(youtube_data):
-
-    videos = []
-
-    for item in youtube_data.get("items", []):
-
-        snippet = item.get("snippet", {})
-        statistics = item.get("statistics", {})
-
-        video_id = item.get("id", "")
-
-        title = snippet.get("title", "")
-        channel = snippet.get("channelTitle", "")
-        published = snippet.get("publishedAt", "")
-        category_id = snippet.get("categoryId", "")
-
-        views = statistics.get("viewCount", "0")
-        likes = statistics.get("likeCount", "0")
-        comments = statistics.get("commentCount", "0")
-
-        videos.append({
-            "video_id": video_id,
-            "title": title,
-            "channel": channel,
-            "published_at": published,
-            "category_id": category_id,
-            "views": views,
-            "likes": likes,
-            "comments": comments
-        })
+    print(f"✓ Saved: {processed_file}")
 
     return videos
 
 
 # ============================================================
-# AI TREND ANALYSIS
+# PREPARE DATA FOR GEMINI
 # ============================================================
 
-def generate_ai_report(videos):
+def prepare_gemini_data(videos):
+    simplified = []
 
-    if not videos:
-        raise RuntimeError(
-            "No YouTube videos were collected."
-        )
-
-    compact_data = []
-
-    for video in videos:
-
-        compact_data.append({
+    for index, video in enumerate(
+        videos,
+        start=1,
+    ):
+        simplified.append({
+            "rank": index,
             "title": video["title"],
             "channel": video["channel"],
             "views": video["views"],
             "likes": video["likes"],
             "comments": video["comments"],
-            "published_at": video["published_at"]
+            "published_at": video["published_at"],
+            "description": video["description"],
+            "tags": video["tags"],
+            "url": video["url"],
         })
 
-    data_text = json.dumps(
-        compact_data,
+    return json.dumps(
+        simplified,
+        indent=2,
         ensure_ascii=False,
-        indent=2
     )
 
+
+# ============================================================
+# GEMINI API
+# ============================================================
+
+def ask_gemini(prompt):
+    print()
+    print("Sending trend data to Gemini...")
+
+    try:
+        from google import genai
+    except ImportError as error:
+        raise RuntimeError(
+            "google-genai package is missing. "
+            "Add google-genai to requirements.txt."
+        ) from error
+
+    client = genai.Client(
+        api_key=GEMINI_API_KEY
+    )
+
+    last_error = None
+
+    for model_name in GEMINI_MODELS:
+        print(
+            f"Trying Gemini model: "
+            f"{model_name}"
+        )
+
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
+
+            text = getattr(
+                response,
+                "text",
+                None,
+            )
+
+            if text and text.strip():
+                print(
+                    f"✓ Gemini response received "
+                    f"using {model_name}"
+                )
+
+                return text.strip()
+
+            print(
+                f"⚠ Empty Gemini response "
+                f"from {model_name}"
+            )
+
+        except Exception as error:
+            last_error = error
+
+            print(
+                f"⚠ Gemini model failed: "
+                f"{model_name}"
+            )
+            print(str(error))
+
+    raise RuntimeError(
+        "All Gemini models failed.\n"
+        f"Last error: {last_error}"
+    )
+
+
+# ============================================================
+# GENERATE AI REPORT
+# ============================================================
+
+def generate_ai_report(videos):
+    print()
+    print("=" * 60)
+    print("GENERATING AI TREND REPORT")
+    print("=" * 60)
+
+    trend_data = prepare_gemini_data(videos)
+
     prompt = f"""
-Analyze the following current YouTube trending videos from India.
+You are an expert YouTube trend intelligence analyst.
 
-DATA:
+Analyze the following current YouTube trending video data.
 
-{data_text}
+Create a practical report for a YouTube creator
+who wants to make viral Indian/Telugu content.
 
-Create a YouTube Trend Intelligence Report.
+Analyze:
 
-Include:
+1. Overall YouTube trends
+2. Common content formats
+3. Common topics
+4. Viral title patterns
+5. Viral hooks
+6. Audience interests
+7. Strong engagement patterns
+8. Shorts opportunities
+9. Long-form opportunities
+10. Telugu/Indian opportunities
+11. Comedy opportunities
+12. Thriller/suspense opportunities
 
-1. Trend Summary
-
-Explain the major patterns visible in the data.
-
-2. Content Patterns
-
-Identify:
-- recurring topics
-- formats
-- hooks
-- titles
-- audience interests
-- engagement patterns
-
-3. Top 10 Video Ideas
-
-Generate 10 original video ideas inspired by the trends.
+Then generate 10 ORIGINAL video ideas.
 
 For every idea provide:
 
 Title:
 Concept:
-Why it may attract viewers:
 Hook:
+Why it could work:
 Suggested format:
 
-4. Telugu/Indian Creator Opportunities
+Finally provide the TOP 3 ideas
+the creator should make first.
 
-Give ideas suitable for:
-- Telugu audience
-- Indian audience
-- YouTube Shorts
-- YouTube videos
+Do not copy existing titles.
+Do not recommend copying another creator.
 
-5. Final Action Plan
+CURRENT TREND DATA:
 
-Give practical steps for creating content from these trends.
-
-Do NOT claim that any idea is guaranteed to go viral.
-Use the supplied data only as trend evidence.
+{trend_data}
 """
 
-    print("Sending trend data to OpenRouter...")
-    print(f"Model: {OPENROUTER_MODEL}")
-    print()
+    report = ask_gemini(prompt)
 
-    report = ask_openrouter(prompt)
+    if not report:
+        raise RuntimeError(
+            "Gemini generated an empty report."
+        )
 
     return report
 
 
 # ============================================================
-# SAVE REPORT
+# CLEAN TEXT
 # ============================================================
 
-def save_report(report):
+def clean_text(text):
+    for marker in (
+        "###",
+        "##",
+        "#",
+        "**",
+        "__",
+        "`",
+    ):
+        text = text.replace(
+            marker,
+            "",
+        )
+
+    return text.strip()
+
+
+# ============================================================
+# CREATE PDF
+# ============================================================
+
+def create_pdf(report):
+    print()
+    print("=" * 60)
+    print("CREATING PDF REPORT")
+    print("=" * 60)
 
     timestamp = datetime.now().strftime(
-        "%Y-%m-%d_%H-%M-%S"
+        "%Y%m%d_%H%M%S"
     )
 
-    filename = (
-        f"youtube_trend_report_{timestamp}.txt"
+    pdf_file = (
+        REPORTS_DIR
+        / f"youtube_trend_report_{timestamp}.pdf"
     )
 
-    path = REPORTS_DIR / filename
+    document = SimpleDocTemplate(
+        str(pdf_file),
+        pagesize=A4,
+        rightMargin=45,
+        leftMargin=45,
+        topMargin=45,
+        bottomMargin=45,
+    )
 
-    with open(
-        path,
-        "w",
-        encoding="utf-8"
-    ) as file:
+    styles = getSampleStyleSheet()
 
-        file.write(
-            "YOUTUBE TREND INTELLIGENCE REPORT\n"
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        alignment=TA_CENTER,
+        fontSize=20,
+        leading=25,
+        spaceAfter=20,
+    )
+
+    heading_style = ParagraphStyle(
+        "ReportHeading",
+        parent=styles["Heading2"],
+        fontSize=14,
+        leading=18,
+        spaceBefore=12,
+        spaceAfter=8,
+    )
+
+    body_style = ParagraphStyle(
+        "ReportBody",
+        parent=styles["BodyText"],
+        fontSize=10,
+        leading=15,
+        spaceAfter=8,
+    )
+
+    story = [
+        Paragraph(
+            "YOUTUBE TREND INTELLIGENCE REPORT",
+            title_style,
+        ),
+        Paragraph(
+            datetime.now().strftime(
+                "Generated on %d %B %Y at %I:%M %p"
+            ),
+            body_style,
+        ),
+        Spacer(1, 10),
+    ]
+
+    for line in clean_text(report).splitlines():
+        line = line.strip()
+
+        if not line:
+            story.append(Spacer(1, 5))
+            continue
+
+        safe_line = (
+            line
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
         )
 
-        file.write("=" * 60)
-        file.write("\n\n")
+        if (
+            len(line) < 120
+            and (
+                (
+                    len(line) >= 2
+                    and line[:2].isdigit()
+                )
+                or line.endswith(":")
+            )
+        ):
+            story.append(
+                Paragraph(
+                    safe_line,
+                    heading_style,
+                )
+            )
+        else:
+            story.append(
+                Paragraph(
+                    safe_line,
+                    body_style,
+                )
+            )
 
-        file.write(report)
+    document.build(story)
 
-        file.write("\n\n")
-        file.write("=" * 60)
-        file.write("\n")
+    print(f"✓ PDF created: {pdf_file}")
 
-        file.write(
-            f"Generated: {datetime.now().isoformat()}\n"
-        )
-
-    print()
-    print(f"✓ AI report saved: {path}")
-
-    return path
+    return pdf_file
 
 
 # ============================================================
-# SAVE SUMMARY
+# SEND EMAIL THROUGH GMAIL
+# ============================================================
+
+def send_email(pdf_file):
+    print()
+    print("=" * 60)
+    print("SENDING EMAIL")
+    print("=" * 60)
+
+    message = EmailMessage()
+
+    message["From"] = GMAIL_USER
+    message["To"] = GMAIL_TO
+    message["Subject"] = (
+        "YouTube Trend Intelligence Report"
+    )
+
+    message.set_content(
+        f"""
+Hello,
+
+Your latest YouTube Trend Intelligence report
+has been generated successfully using Gemini AI.
+
+The attached PDF contains:
+
+• Current YouTube trends
+• Viral content patterns
+• Title and hook patterns
+• Shorts opportunities
+• Long-form opportunities
+• Telugu/Indian opportunities
+• Comedy opportunities
+• Thriller opportunities
+• 10 original video ideas
+• Top 3 recommended ideas
+
+Generated:
+{datetime.now().strftime("%d %B %Y, %I:%M %p")}
+
+Regards,
+YouTube Trend Intelligence
+"""
+    )
+
+    with open(
+        pdf_file,
+        "rb",
+    ) as file:
+        message.add_attachment(
+            file.read(),
+            maintype="application",
+            subtype="pdf",
+            filename=pdf_file.name,
+        )
+
+    context = ssl.create_default_context()
+
+    with smtplib.SMTP_SSL(
+        "smtp.gmail.com",
+        465,
+        context=context,
+    ) as server:
+        server.login(
+            GMAIL_USER,
+            GMAIL_APP_PASSWORD,
+        )
+
+        server.send_message(message)
+
+    print(
+        f"✓ Email sent successfully to "
+        f"{GMAIL_TO}"
+    )
+
+
+# ============================================================
+# SAVE TEXT SUMMARY
 # ============================================================
 
 def save_summary(report):
-
     timestamp = datetime.now().strftime(
-        "%Y-%m-%d_%H-%M-%S"
+        "%Y%m%d_%H%M%S"
     )
 
-    filename = (
-        f"youtube_summary_{timestamp}.txt"
+    summary_file = (
+        SUMMARIES_DIR
+        / f"youtube_trend_summary_{timestamp}.txt"
     )
 
-    path = SUMMARIES_DIR / filename
+    summary_file.write_text(
+        report,
+        encoding="utf-8",
+    )
 
-    with open(
-        path,
-        "w",
-        encoding="utf-8"
-    ) as file:
+    print(
+        f"✓ Summary saved: {summary_file}"
+    )
 
-        file.write(report)
-
-    print(f"✓ Summary saved: {path}")
-
-    return path
+    return summary_file
 
 
 # ============================================================
@@ -490,85 +658,56 @@ def save_summary(report):
 # ============================================================
 
 def main():
-
-    print("=" * 60)
-    print("COLLECTING YOUTUBE TRENDING VIDEOS")
-    print("=" * 60)
     print()
-
-    youtube_data = get_youtube_trending_videos(
-        region_code="IN",
-        max_results=50
-    )
-
-    videos = prepare_trend_data(
-        youtube_data
-    )
-
-    print()
+    print("=" * 46)
     print(
-        f"✓ Collected {len(videos)} trending videos"
+        "STARTING YOUTUBE TREND INTELLIGENCE"
     )
+    print("=" * 46)
 
-    if not videos:
-        print("ERROR: YouTube returned zero videos.")
-        sys.exit(1)
-
-    # Save raw data
-    save_json(
-        youtube_data,
-        "youtube_trending_raw.json"
-    )
-
-    # Save processed data
-    save_json(
-        videos,
-        "youtube_trending_processed.json"
-    )
-
-    print()
-    print("=" * 60)
-    print("GENERATING AI TREND REPORT")
-    print("=" * 60)
-    print()
-
-    report = generate_ai_report(
-        videos
-    )
-
-    save_report(report)
-
-    save_summary(report)
-
-    print()
-    print("=" * 60)
-    print("YOUTUBE TREND INTELLIGENCE COMPLETED")
-    print("=" * 60)
-    print()
-
-
-if __name__ == "__main__":
     try:
-        main()
+        check_environment()
 
-    except KeyboardInterrupt:
+        videos = get_youtube_trending_videos()
+
+        if not videos:
+            raise RuntimeError(
+                "No YouTube trending videos found."
+            )
+
+        report = generate_ai_report(videos)
+
+        save_summary(report)
+
+        pdf_file = create_pdf(report)
+
+        send_email(pdf_file)
+
         print()
-        print("Process interrupted.")
-        sys.exit(1)
+        print("=" * 60)
+        print(
+            "YOUTUBE TREND INTELLIGENCE COMPLETED"
+        )
+        print("=" * 60)
+        print("✓ YouTube data collected")
+        print("✓ Gemini AI report generated")
+        print("✓ PDF created")
+        print("✓ Email sent")
+        print("=" * 60)
 
     except Exception as error:
-
         print()
         print("=" * 60)
         print("ERROR")
         print("=" * 60)
-
         print(str(error))
-
         print()
         print("Full traceback:")
-
-        import traceback
         traceback.print_exc()
 
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+

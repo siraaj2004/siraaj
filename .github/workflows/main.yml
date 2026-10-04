@@ -1,10 +1,8 @@
 name: YouTube High CTR Idea Generator
 
 on:
-  # Run at the beginning of every hour
-  - cron: "0 * * * *"
-
-  # Allow manual execution
+  schedule:
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -12,269 +10,119 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-
-      # ============================================================
-      # CHECKOUT
-      # ============================================================
-
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      # ============================================================
-      # PYTHON
-      # ============================================================
 
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
-
-      # ============================================================
-      # SHOW FILES
-      # ============================================================
-
-      - name: Show project files
-        shell: bash
-        run: |
-          set -e
-
-          echo "=============================================="
-          echo "PROJECT DIRECTORY"
-          echo "=============================================="
-
-          pwd
-
-          echo ""
-          echo "Python files:"
-          find . -type f -name "*.py" \
-            -not -path "./.git/*" \
-            -print | sort
-
-      # ============================================================
-      # INSTALL DEPENDENCIES
-      # ============================================================
+          python-version: '3.12'
 
       - name: Install dependencies
-        shell: bash
         run: |
-          set -euxo pipefail
-
-          python --version
-          python -m pip --version
-
           python -m pip install --upgrade pip
-
           if [ -f requirements.txt ]; then
-            python -m pip install -r requirements.txt
+            pip install -r requirements.txt
           fi
+          pip install requests python-dotenv
 
-          python -m pip install requests python-dotenv
-
-      # ============================================================
-      # FIND MAIN.PY
-      # ============================================================
-
-      - name: Locate main.py
-        id: locate_main
+      - name: Find main.py
+        id: find_main
         shell: bash
         run: |
-          set -e
-
-          echo "=============================================="
-          echo "SEARCHING FOR main.py"
-          echo "=============================================="
-
-          MAIN_FILE=$(find . \
-            -type f \
-            -name "main.py" \
-            -not -path "./.git/*" \
-            -print | head -n 1)
+          MAIN_FILE=$(find . -type f -name main.py -not -path './.git/*' | head -n 1)
 
           if [ -z "$MAIN_FILE" ]; then
-            echo "ERROR: main.py was not found."
-
-            echo ""
-            echo "Available Python files:"
-            find . -type f -name "*.py" \
-              -not -path "./.git/*" \
-              -print | sort
-
+            echo 'ERROR: main.py not found'
+            find . -type f -name '*.py' -not -path './.git/*'
             exit 1
           fi
 
-          echo "Found:"
-          echo "$MAIN_FILE"
-
+          echo "Found main.py: $MAIN_FILE"
           echo "main_file=$MAIN_FILE" >> "$GITHUB_OUTPUT"
 
-      # ============================================================
-      # CHECK SECRETS
-      # ============================================================
-
-      - name: Check secrets
-        env:
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          GMAIL_TO: ${{ secrets.GMAIL_TO }}
-        shell: bash
-        run: |
-          set -e
-
-          echo "=============================================="
-          echo "CHECKING SECRETS"
-          echo "=============================================="
-
-          test -n "$YOUTUBE_API_KEY" || {
-            echo "ERROR: YOUTUBE_API_KEY missing"
-            exit 1
-          }
-
-          test -n "$OPENROUTER_API_KEY" || {
-            echo "ERROR: OPENROUTER_API_KEY missing"
-            exit 1
-          }
-
-          test -n "$GMAIL_USER" || {
-            echo "ERROR: GMAIL_USER missing"
-            exit 1
-          }
-
-          test -n "$GMAIL_APP_PASSWORD" || {
-            echo "ERROR: GMAIL_APP_PASSWORD missing"
-            exit 1
-          }
-
-          test -n "$GMAIL_TO" || {
-            echo "ERROR: GMAIL_TO missing"
-            exit 1
-          }
-
-          echo "All secrets are configured."
-
-      # ============================================================
-      # RUN YOUTUBE GENERATOR
-      # ============================================================
-
-      - name: Generate YouTube High CTR Ideas
-        id: generate
+      - name: Run YouTube Generator
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_MODEL: openrouter/free
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          echo "======================================================================"
-          echo "STARTING YOUTUBE HIGH CTR IDEA GENERATOR"
-          echo "======================================================================"
-
-          MAIN_FILE="${{ steps.locate_main.outputs.main_file }}"
-
-          echo "Running:"
-          echo "$MAIN_FILE"
-
-          python "$MAIN_FILE"
-
-          echo ""
-          echo "======================================================================"
-          echo "SEARCHING FOR GENERATED RESULT"
-          echo "======================================================================"
-
-          RESULT_FILE=$(find . \
-            -type f \
-            -name "youtube_high_ctr_ideas.json" \
-            -not -path "./.git/*" \
-            -print | head -n 1)
-
-          if [ -z "$RESULT_FILE" ]; then
-            echo "ERROR: youtube_high_ctr_ideas.json was not created."
-            exit 1
-          fi
-
-          echo "Result:"
-          echo "$RESULT_FILE"
-
-          echo "result_file=$RESULT_FILE" >> "$GITHUB_OUTPUT"
-
-      # ============================================================
-      # FIND GMAIL SENDER
-      # ============================================================
-
-      - name: Locate gmail_sender.py
-        id: locate_gmail
         shell: bash
         run: |
           set -e
 
-          GMAIL_FILE=$(find . \
+          echo '======================================================================'
+          echo 'STARTING YOUTUBE HIGH CTR IDEA GENERATOR'
+          echo '======================================================================'
+
+          python '${{ steps.find_main.outputs.main_file }}'
+
+          echo '======================================================================'
+          echo 'GENERATOR COMPLETED'
+          echo '======================================================================'
+
+      - name: Find generated JSON
+        id: find_result
+        shell: bash
+        run: |
+          RESULT_FILE=$(find . \
             -type f \
-            -name "gmail_sender.py" \
-            -not -path "./.git/*" \
-            -print | head -n 1)
+            -name youtube_high_ctr_ideas.json \
+            -not -path './.git/*' \
+            | head -n 1)
 
-          if [ -z "$GMAIL_FILE" ]; then
-            echo "ERROR: gmail_sender.py was not found."
-
-            echo ""
-            echo "Available Python files:"
-            find . -type f -name "*.py" \
-              -not -path "./.git/*" \
-              -print | sort
-
+          if [ -z "$RESULT_FILE" ]; then
+            echo 'ERROR: youtube_high_ctr_ideas.json not found'
             exit 1
           fi
 
-          echo "Gmail sender:"
-          echo "$GMAIL_FILE"
+          echo "Result file: $RESULT_FILE"
+          echo "result_file=$RESULT_FILE" >> "$GITHUB_OUTPUT"
 
+      - name: Find Gmail sender
+        id: find_gmail
+        shell: bash
+        run: |
+          GMAIL_FILE=$(find . \
+            -type f \
+            -name gmail_sender.py \
+            -not -path './.git/*' \
+            | head -n 1)
+
+          if [ -z "$GMAIL_FILE" ]; then
+            echo 'ERROR: gmail_sender.py not found'
+            exit 1
+          fi
+
+          echo "Gmail sender: $GMAIL_FILE"
           echo "gmail_file=$GMAIL_FILE" >> "$GITHUB_OUTPUT"
 
-      # ============================================================
-      # SEND EMAIL
-      # ============================================================
-
-      - name: Send YouTube Ideas Email
+      - name: Send Email
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           GMAIL_TO: ${{ secrets.GMAIL_TO }}
-
-          EMAIL_SUBJECT: "🔥 YouTube High CTR Ideas - Hourly"
-
-          YOUTUBE_RESULT_FILE: ${{ steps.generate.outputs.result_file }}
-
+          EMAIL_SUBJECT: 'YouTube High CTR Ideas - Hourly'
+          YOUTUBE_RESULT_FILE: ${{ steps.find_result.outputs.result_file }}
         shell: bash
         run: |
-          set -euxo pipefail
+          set -e
 
-          echo "======================================================================"
-          echo "SENDING EMAIL"
-          echo "======================================================================"
+          echo '======================================================================'
+          echo 'SENDING EMAIL'
+          echo '======================================================================'
 
-          GMAIL_FILE="${{ steps.locate_gmail.outputs.gmail_file }}"
+          python '${{ steps.find_gmail.outputs.gmail_file }}'
 
-          python "$GMAIL_FILE"
+          echo '======================================================================'
+          echo 'EMAIL SENT SUCCESSFULLY'
+          echo '======================================================================'
 
-          echo ""
-          echo "======================================================================"
-          echo "EMAIL SENT SUCCESSFULLY"
-          echo "======================================================================"
-
-      # ============================================================
-      # UPLOAD RESULT
-      # ============================================================
-
-      - name: Upload generated result
+      - name: Upload Result
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: youtube-high-ctr-results-${{ github.run_number }}
-          path: |
-            **/youtube_high_ctr_ideas.json
+          path: '**/youtube_high_ctr_ideas.json'
           if-no-files-found: error
           retention-days: 7

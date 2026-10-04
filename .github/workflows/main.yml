@@ -20,7 +20,7 @@ jobs:
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
 
-      OPENROUTER_MODEL: openrouter/auto
+      OPENROUTER_MODEL: openrouter/free
 
       RESEND_FROM: onboarding@resend.dev
 

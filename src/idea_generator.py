@@ -1,1183 +1,553 @@
 import os
-import re
 import json
-import time
+import re
+from datetime import datetime
 from pathlib import Path
-from datetime import datetime, timedelta
-from collections import Counter
 
-import requests
 from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-ENV_FILE = BASE_DIR / ".env"
-
-DATA_DIR = BASE_DIR / "data"
-SUMMARY_DIR = BASE_DIR / "summaries"
-
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
-
-load_dotenv(ENV_FILE)
+load_dotenv()
 
 
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-OPENROUTER_MODEL = os.getenv(
-    "OPENROUTER_MODEL",
-    "openai/gpt-4o-mini"
-)
-
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-
-TODAY = datetime.now().strftime("%Y-%m-%d")
-
-
-# ============================================================
-# SETTINGS
-# ============================================================
-
-# Representative world markets.
-# "World" is not a single YouTube API region, so we sample
-# several major markets.
-
-WORLD_REGIONS = [
-    "US",
-    "GB",
-    "CA",
-    "AU",
-    "BR",
-    "JP",
-    "KR",
-    "ID",
-    "DE",
-    "FR",
-]
-
-INDIA_REGION = "IN"
-
-MAX_TREND_VIDEOS_PER_REGION = 50
-
-MAX_SHORTS_TRENDS = 40
-MAX_LONGFORM_TRENDS = 40
-MAX_GENRE_TRENDS = 30
-
-
-# ============================================================
-# YOUTUBE CATEGORY NAMES
-# ============================================================
-
-CATEGORY_NAMES = {
-    "1": "Film & Animation",
-    "2": "Autos & Vehicles",
-    "10": "Music",
-    "15": "Pets & Animals",
-    "17": "Sports",
-    "19": "Travel & Events",
-    "20": "Gaming",
-    "22": "People & Blogs",
-    "23": "Comedy",
-    "24": "Entertainment",
-    "25": "News & Politics",
-    "26": "Howto & Style",
-    "27": "Education",
-    "28": "Science & Technology",
-    "29": "Nonprofits & Activism",
-}
-
-
-# ============================================================
-# HELPERS
-# ============================================================
-
-def require_environment():
-
-    missing = []
-
-    if not YOUTUBE_API_KEY:
-        missing.append("YOUTUBE_API_KEY")
-
-    if not OPENROUTER_API_KEY:
-        missing.append("OPENROUTER_API_KEY")
-
-    if missing:
-        print()
-        print("=" * 70)
-        print("ERROR: REQUIRED ENVIRONMENT VARIABLES ARE MISSING")
-        print("=" * 70)
-
-        for item in missing:
-            print(f"❌ {item}")
-
-        print()
-        print("Add them to your .env file or GitHub Actions Secrets.")
-        print()
-
-        raise SystemExit(1)
-
-
-def safe_int(value, default=0):
-    try:
-        return int(value)
-    except Exception:
-        return default
-
-
-def parse_duration(duration):
-    """
-    Convert ISO 8601 YouTube duration into seconds.
-
-    Example:
-    PT45S -> 45
-    PT8M20S -> 500
-    PT1H2M -> 3720
-    """
-
-    if not duration:
-        return 0
-
-    match = re.match(
-        r"PT"
-        r"(?:(\d+)H)?"
-        r"(?:(\d+)M)?"
-        r"(?:(\d+)S)?",
-        duration
+if not GEMINI_API_KEY:
+    raise RuntimeError(
+        "GEMINI_API_KEY is missing. Add GEMINI_API_KEY to your .env file."
     )
 
-    if not match:
-        return 0
 
-    hours = safe_int(match.group(1))
-    minutes = safe_int(match.group(2))
-    seconds = safe_int(match.group(3))
-
-    return hours * 3600 + minutes * 60 + seconds
+MODEL_NAME = os.getenv(
+    "GEMINI_MODEL",
+    "gemini-3.8-flash"
+)
 
 
-def format_duration(seconds):
+OUTPUT_DIR = Path("data")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    minutes = seconds // 60
-    secs = seconds % 60
 
-    if minutes >= 60:
-        hours = minutes // 60
-        minutes = minutes % 60
-        return f"{hours}h {minutes}m"
+client = genai.Client(api_key=GEMINI_API_KEY)
 
-    return f"{minutes}m {secs}s"
+
+SYSTEM_INSTRUCTION = """
+You are an elite YouTube trend strategist, viral content researcher,
+creative director, screenwriter and audience psychology expert.
+
+Your job is NOT to produce random YouTube ideas.
+
+Your job is to identify concepts that make a viewer immediately think:
+
+"WAH... WHAT AN IDEA."
+
+The concepts must have strong curiosity, emotional tension, novelty,
+clear audience appeal and a reason to click.
+
+You are generating ideas for an Indian creator who can create:
+1. YouTube Shorts
+2. YouTube long form videos around 8 to 10 minutes
+
+The creator prefers:
+- Thriller
+- Mystery
+- Suspense
+- Psychological concepts
+- Unexpected situations
+- Real life curiosity
+- Technology
+- AI
+- Internet culture
+- Human behaviour
+- Indian relatable situations
+- Strong twists
+- Comedy mixed with serious build up when appropriate
+- Concepts that can be filmed with limited resources
+
+Do NOT assume every idea needs expensive production.
+
+VERY IMPORTANT:
+
+Do not generate silly ideas.
+
+Do not generate childish prank concepts.
+
+Do not generate generic "try this challenge" ideas.
+
+Do not generate ordinary reaction videos.
+
+Do not generate generic motivation.
+
+Do not generate generic facts videos.
+
+Do not generate concepts that have already been repeated thousands of times
+unless there is a genuinely new angle.
+
+Do not simply change the title of an old idea.
+
+Every idea should contain a strong underlying concept.
+
+The viewer should understand why they need to click.
+
+The first few seconds should create curiosity.
+
+For long form, the concept must have enough story, escalation and payoff
+to sustain approximately 8 to 10 minutes.
+
+For Shorts, the concept must have a powerful hook and fast escalation.
+
+Roman Telugu must feel natural and conversational.
+
+Do not translate English word by word.
+
+Use natural Roman Telugu mixed with commonly used English words.
+
+Example style:
+
+"Morning lechi phone open chesthe, ninna night nenu delete chesina
+photo malli gallery lo kanipinchindi. Kaani aa photo lo nenu asalu
+eppudu vellani place kanipisthundi."
+
+This is only an example of writing style.
+
+Do not copy this example.
+
+Each concept must feel like a real video someone would genuinely want
+to watch.
+
+Think like:
+MrBeast level curiosity,
+Netflix level premise,
+Indian audience relatability,
+Shorts level hook,
+and independent creator practicality.
+
+But do not copy any creator.
+"""
+
+
+USER_REQUIREMENTS = """
+Create a complete YouTube Idea Intelligence Report.
+
+The report must contain exactly these seven major sections.
+
+SECTION 1
+INDIA YOUTUBE TRENDS
+
+Separate:
+A. India YouTube long form trends for 8 to 10 minute videos
+B. India YouTube Shorts trends
+
+For each trend explain:
+- Trend
+- Why it is working
+- Audience psychology
+- Possible opportunity
+- Saturation level
+- How a small creator can use it
+
+
+SECTION 2
+WORLD YOUTUBE TRENDS
+
+Separate:
+A. World YouTube long form trends for 8 to 10 minute videos
+B. World YouTube Shorts trends
+
+For each trend explain:
+- Trend
+- Why it is working
+- Audience psychology
+- Opportunity for Indian creators
+- Saturation
+- Adaptation possibility
+
+
+SECTION 3
+YOUTUBE GENRE TRENDS
+
+Analyze important YouTube genres separately for:
+A. Long form 8 to 10 minutes
+B. Shorts
+
+Consider genres such as:
+- Thriller
+- Mystery
+- Comedy
+- Technology
+- AI
+- Psychology
+- Human behaviour
+- Storytelling
+- Experiments
+- Internet mysteries
+- Social experiments
+- Documentary style
+- Horror
+- Finance
+- Education
+- Lifestyle
+- Entertainment
+
+Do not force all genres to be equally important.
+
+Identify the strongest opportunities.
+
+
+SECTION 4
+INDIA AND WORLD TREND BASED SHORTS IDEAS
+
+Generate highly engaging Shorts ideas based specifically on the trends
+identified in Sections 1, 2 and 3.
+
+Give 20 ideas.
+
+Every idea must contain:
+
+Idea Number
+High CTR Title
+Hook
+Core Concept
+Roman Telugu Logline
+Why People Will Click
+Why It Can Retain Viewers
+Production Difficulty
+Trend Used
+CTR Score out of 100
+Virality Score out of 100
+Originality Score out of 100
+
+The Roman Telugu logline must be especially engaging.
+
+It should sound like a movie premise compressed into a Shorts concept.
+
+Avoid silly ideas.
+
+
+SECTION 5
+INDIA AND WORLD TREND BASED LONG FORM IDEAS
+
+Generate 20 highly engaging long form ideas.
+
+Each must work for an 8 to 10 minute video.
+
+Every idea must contain:
+
+Idea Number
+High CTR Title
+Thumbnail Concept
+Opening Hook
+Core Premise
+Story Structure
+Roman Telugu Logline
+Escalation
+Twist or Payoff
+Why People Will Click
+Why People Will Watch Until The End
+Production Difficulty
+Trend Used
+CTR Score out of 100
+Retention Score out of 100
+Originality Score out of 100
+
+The concepts must have enough story to support 8 to 10 minutes.
+
+Avoid simple list videos unless the concept itself is exceptionally strong.
+
+
+SECTION 6
+INDIA AND WORLD GENERAL YOUTUBE IDEAS
+NOT BASED ON CURRENT TRENDS
+SHORTS
+
+Generate 20 original Shorts ideas.
+
+These must NOT depend on currently trending topics.
+
+Use timeless human curiosity.
+
+Strong areas include:
+- Strange situations
+- Human psychology
+- Mystery
+- Everyday life
+- Technology
+- Relationships
+- Fear
+- Suspense
+- Unexpected consequences
+- Social behaviour
+- Hidden rules
+- Coincidences
+- Moral dilemmas
+
+Every idea must contain:
+
+High CTR Title
+Hook
+Concept
+Roman Telugu Logline
+Why It Is Interesting
+Why It Is Shareable
+CTR Score
+Originality Score
+
+
+SECTION 7
+INDIA AND WORLD GENERAL YOUTUBE IDEAS
+NOT BASED ON CURRENT TRENDS
+LONG FORM 8 TO 10 MINUTES
+
+Generate 20 original long form concepts.
+
+These must NOT depend on current trends.
+
+They should have:
+- Strong premise
+- Escalation
+- Mystery or emotional tension
+- A payoff
+- Enough material for 8 to 10 minutes
+- Strong title potential
+- Strong thumbnail potential
+
+Every idea must contain:
+
+High CTR Title
+Thumbnail Concept
+Opening Hook
+Core Premise
+8 to 10 Minute Story Structure
+Roman Telugu Logline
+Escalation
+Twist or Payoff
+Why People Will Click
+Why People Will Finish
+CTR Score
+Retention Score
+Originality Score
+
+
+VERY IMPORTANT FINAL RANKING
+
+At the end create:
+
+TOP 10 HIGHEST CTR IDEAS
+
+Rank the 10 strongest ideas from the entire report.
+
+For each give:
+
+Rank
+Title
+Format
+Roman Telugu Logline
+CTR Score
+Retention Score
+Originality Score
+Why This Is A Winner
+
+The first 3 must be exceptional.
+
+Do not fill the report with mediocre ideas just to reach a number.
+
+If an idea is weak, replace it.
+
+QUALITY FILTER
+
+Before returning the final answer, internally score every idea.
+
+Reject an idea if:
+- It is generic
+- It feels childish
+- It feels copied
+- It has weak curiosity
+- It has no conflict
+- It has no escalation
+- It has no payoff
+- The title is not clickable
+- The Roman Telugu logline is boring
+- It cannot realistically retain viewers
+
+Only return ideas that survive the quality filter.
+
+Do not mention this internal filtering process in the final report.
+"""
+
+
+TREND_RESEARCH_PROMPT = """
+First perform deep current trend analysis using your available knowledge
+of YouTube and current internet culture.
+
+Focus on:
+India
+Global
+YouTube Shorts
+YouTube long form
+Major creator formats
+Emerging viewer interests
+Fast growing topics
+Audience psychology
+Content gaps
+Oversaturated formats
+Underused angles
+
+Important:
+
+Do not invent precise statistics.
+
+If exact current statistics are unavailable, describe the trend
+qualitatively instead of making up numbers.
+
+Prioritize recent developments but also distinguish temporary trends
+from durable audience behaviour.
+
+Then generate the complete report requested below.
+
+"""
 
 
 def clean_text(text):
-
     if not text:
         return ""
 
-    return re.sub(r"\s+", " ", text).strip()
-
-
-# ============================================================
-# YOUTUBE API
-# ============================================================
-
-def youtube_get(endpoint, params):
-
-    url = f"https://www.googleapis.com/youtube/v3/{endpoint}"
-
-    params = dict(params)
-    params["key"] = YOUTUBE_API_KEY
-
-    response = requests.get(
-        url,
-        params=params,
-        timeout=30
-    )
-
-    if response.status_code != 200:
-
-        print()
-        print("YouTube API ERROR")
-        print(response.status_code)
-        print(response.text[:1000])
-
-        response.raise_for_status()
-
-    return response.json()
-
-
-# ============================================================
-# GET MOST POPULAR VIDEOS
-# ============================================================
-
-def get_most_popular(region_code, max_results=50):
-
-    data = youtube_get(
-        "videos",
-        {
-            "part": "snippet,contentDetails,statistics",
-            "chart": "mostPopular",
-            "regionCode": region_code,
-            "maxResults": min(max_results, 50),
-        }
-    )
-
-    videos = []
-
-    for item in data.get("items", []):
-
-        snippet = item.get("snippet", {})
-        stats = item.get("statistics", {})
-        details = item.get("contentDetails", {})
-
-        video_id = item.get("id")
-
-        duration_seconds = parse_duration(
-            details.get("duration")
-        )
-
-        category_id = str(
-            snippet.get("categoryId", "")
-        )
-
-        video = {
-            "id": video_id,
-            "title": clean_text(snippet.get("title")),
-            "description": clean_text(
-                snippet.get("description", "")
-            )[:500],
-            "channel": clean_text(
-                snippet.get("channelTitle")
-            ),
-            "category_id": category_id,
-            "category": CATEGORY_NAMES.get(
-                category_id,
-                "Other"
-            ),
-            "published_at": snippet.get(
-                "publishedAt",
-                ""
-            ),
-            "duration_seconds": duration_seconds,
-            "duration": format_duration(
-                duration_seconds
-            ),
-            "views": safe_int(
-                stats.get("viewCount")
-            ),
-            "likes": safe_int(
-                stats.get("likeCount")
-            ),
-            "comments": safe_int(
-                stats.get("commentCount")
-            ),
-            "region": region_code,
-        }
-
-        videos.append(video)
-
-    return videos
-
-
-# ============================================================
-# CLASSIFY FORMAT
-# ============================================================
-
-def classify_format(video):
-
-    seconds = video.get("duration_seconds", 0)
-
-    # Approximate Shorts candidates.
-    # YouTube API does not expose a universal "Short" boolean
-    # through mostPopular.
-
-    if seconds <= 60:
-        return "shorts"
-
-    # Longform target window.
-    if 7 * 60 <= seconds <= 12 * 60:
-        return "longform"
-
-    return "other"
-
-
-# ============================================================
-# INDIA TRENDS
-# ============================================================
-
-def collect_india_trends():
-
-    print()
-    print("=" * 70)
-    print("COLLECTING INDIA YOUTUBE TRENDS")
-    print("=" * 70)
-
-    videos = get_most_popular(
-        INDIA_REGION,
-        MAX_TREND_VIDEOS_PER_REGION
-    )
-
-    shorts = []
-    longform = []
-
-    for video in videos:
-
-        fmt = classify_format(video)
-
-        if fmt == "shorts":
-            shorts.append(video)
-
-        elif fmt == "longform":
-            longform.append(video)
-
-    return {
-        "shorts": shorts,
-        "longform": longform,
-        "all": videos,
+    replacements = {
+        "#": "",
+        "$": "",
+        "@": "",
+        "*": "",
+        "`": "",
+        "|": "",
     }
 
+    for old, new in replacements.items():
+        text = text.replace(old, new)
 
-# ============================================================
-# WORLD TRENDS
-# ============================================================
+    text = re.sub(r"\n{4,}", "\n\n\n", text)
 
-def collect_world_trends():
+    return text.strip()
 
-    print()
-    print("=" * 70)
-    print("COLLECTING WORLD YOUTUBE TRENDS")
-    print("=" * 70)
 
-    all_videos = []
+def generate_report():
+    prompt = f"""
+{TREND_RESEARCH_PROMPT}
 
-    for region in WORLD_REGIONS:
+{USER_REQUIREMENTS}
 
-        print(f"Fetching {region}...")
+IMPORTANT OUTPUT FORMAT
 
-        try:
+Return a clean professional report.
 
-            videos = get_most_popular(
-                region,
-                MAX_TREND_VIDEOS_PER_REGION
-            )
+Do NOT use markdown symbols.
 
-            all_videos.extend(videos)
+Do NOT use:
+#
+*
+$
+@
+`
+|
 
-        except Exception as e:
+You may use:
 
-            print(
-                f"⚠ Could not fetch {region}: {e}"
-            )
+SECTION 1
+SECTION 2
+A.
+B.
+1.
+2.
+3.
 
-        # Avoid hammering API.
-        time.sleep(0.2)
+Use plain text headings.
 
-    shorts = []
-    longform = []
+Do not put the entire answer inside JSON.
 
-    for video in all_videos:
+Do not provide an introduction that wastes space.
 
-        fmt = classify_format(video)
+Start directly with:
 
-        if fmt == "shorts":
-            shorts.append(video)
+YOUTUBE IDEA INTELLIGENCE REPORT
 
-        elif fmt == "longform":
-            longform.append(video)
+Date: {datetime.now().strftime("%Y-%m-%d")}
 
-    return {
-        "shorts": shorts,
-        "longform": longform,
-        "all": all_videos,
-    }
-
-
-# ============================================================
-# GENRE ANALYSIS
-# ============================================================
-
-def analyze_genres(videos):
-
-    category_counter = Counter()
-
-    for video in videos:
-
-        category = video.get(
-            "category",
-            "Other"
-        )
-
-        category_counter[category] += 1
-
-    result = []
-
-    for category, count in category_counter.most_common():
-
-        result.append(
-            {
-                "genre": category,
-                "video_count": count,
-            }
-        )
-
-    return result
-
-
-# ============================================================
-# TREND ANALYSIS
-# ============================================================
-
-def summarize_trends(videos, limit=30):
-
-    if not videos:
-        return []
-
-    # Remove duplicate video IDs.
-    unique = {}
-
-    for video in videos:
-        unique[video["id"]] = video
-
-    videos = list(unique.values())
-
-    # Sort by views.
-    videos.sort(
-        key=lambda x: x.get("views", 0),
-        reverse=True
-    )
-
-    return videos[:limit]
-
-
-def extract_trend_titles(videos):
-
-    output = []
-
-    for video in videos:
-
-        output.append(
-            {
-                "title": video.get("title"),
-                "category": video.get("category"),
-                "duration": video.get("duration"),
-                "views": video.get("views"),
-                "region": video.get("region"),
-            }
-        )
-
-    return output
-
-
-# ============================================================
-# OPENROUTER
-# ============================================================
-
-def openrouter_generate(
-    system_prompt,
-    user_prompt,
-    temperature=0.85,
-    max_tokens=12000
-):
-
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/",
-        "X-Title": "YouTube Trend Intelligence Idea Generator",
-    }
-
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
-            {
-                "role": "user",
-                "content": user_prompt,
-            },
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-
-    response = requests.post(
-        OPENROUTER_URL,
-        headers=headers,
-        json=payload,
-        timeout=180
-    )
-
-    if response.status_code != 200:
-
-        print()
-        print("OPENROUTER ERROR")
-        print(response.status_code)
-        print(response.text[:2000])
-
-        response.raise_for_status()
-
-    data = response.json()
-
-    try:
-        return data["choices"][0]["message"]["content"]
-    except Exception:
-
-        print("Unexpected OpenRouter response:")
-        print(json.dumps(data, indent=2)[:5000])
-
-        raise RuntimeError(
-            "Could not extract AI response."
-        )
-
-
-# ============================================================
-# AI SYSTEM PROMPT
-# ============================================================
-
-SYSTEM_PROMPT = """
-You are an elite YouTube content strategist, creative director,
-screenwriter and viral-format researcher.
-
-Your job is NOT to produce generic YouTube ideas.
-
-You create concepts that make a creator hear the idea and think:
-
-"WAH. WHAT AN IDEA."
-
-The concepts must feel:
-- fresh
-- clever
-- highly clickable
-- emotionally strong
-- curiosity driven
-- visually understandable
-- easy to explain in one sentence
-- capable of creating comments and discussion
-- suitable for Indian/Indian-Telugu audiences when requested
-- capable of working as YouTube content rather than sounding like
-  generic movie plots
-
-IMPORTANT:
-
-DO NOT generate:
-- childish ideas
-- silly prank concepts
-- generic "24 hours challenge"
-- generic "I tried..."
-- generic reaction videos
-- generic motivational videos
-- generic relationship drama
-- boring daily-vlog concepts
-- obvious horror clichés
-- random AI concepts without a strong hook
-- concepts that require a huge production
-- ideas that depend entirely on expensive locations
-- ideas copied from existing creators
-- simple variations of already famous videos
-- weak concepts with no central mystery
-- concepts that are interesting only because of a title
-
-A strong idea must have a CENTRAL HOOK.
-
-The viewer should immediately ask:
-
-"WHAT HAPPENS?"
-"WHY?"
-"HOW IS THAT POSSIBLE?"
-"WHAT IF...?"
-
-For longform:
-- target approximately 8-10 minutes
-- strong opening
-- escalating curiosity
-- meaningful middle
-- strong reveal/payoff
-- ending that feels worth watching
-- should work with one creator or a small creator setup where possible
-
-For Shorts:
-- immediate hook
-- no slow setup
-- one strong premise
-- escalating curiosity
-- satisfying payoff/twist
-- highly understandable within seconds
-
-HIGH CTR does NOT mean clickbait lying.
-
-The title should create curiosity while accurately representing
-the actual premise.
-
-Roman Telugu loglines must sound natural when spoken by a Telugu
-person using English letters.
-
-Do NOT translate word-by-word awkwardly.
-
-Example of desired style:
-
-"Prathi roju tana phone lo repu jarige oka notification vastundi.
-Modati rendu rojulu ignore chestadu... kani moodo roju vachina
-notification tana own death time ni chupistundi."
-
-This is only an example of style.
-Do not reuse the concept.
-
-Every idea should have:
-1. Title
-2. Hook
-3. Core concept
-4. Roman Telugu logline
-5. Why people will click
-6. Opening 10-second hook
-7. Payoff/twist
-8. Production difficulty
-9. Originality check
-
-You should aggressively reject weak ideas internally before
-returning them.
-
-Quality is more important than quantity.
-"""
-
-
-# ============================================================
-# BUILD TREND CONTEXT
-# ============================================================
-
-def build_trend_context(
-    india,
-    world
-):
-
-    india_shorts = summarize_trends(
-        india["shorts"],
-        MAX_SHORTS_TRENDS
-    )
-
-    india_long = summarize_trends(
-        india["longform"],
-        MAX_LONGFORM_TRENDS
-    )
-
-    world_shorts = summarize_trends(
-        world["shorts"],
-        MAX_SHORTS_TRENDS
-    )
-
-    world_long = summarize_trends(
-        world["longform"],
-        MAX_LONGFORM_TRENDS
-    )
-
-    india_genres = analyze_genres(
-        india["all"]
-    )
-
-    world_genres = analyze_genres(
-        world["all"]
-    )
-
-    context = {
-        "date": TODAY,
-
-        "india": {
-            "shorts": extract_trend_titles(
-                india_shorts
-            ),
-            "longform": extract_trend_titles(
-                india_long
-            ),
-            "genres": india_genres,
-        },
-
-        "world": {
-            "shorts": extract_trend_titles(
-                world_shorts
-            ),
-            "longform": extract_trend_titles(
-                world_long
-            ),
-            "genres": world_genres,
-        },
-    }
-
-    return context
-
-
-# ============================================================
-# AI GENERATION
-# ============================================================
-
-def generate_ideas(trend_context):
-
-    trend_json = json.dumps(
-        trend_context,
-        indent=2,
-        ensure_ascii=False
-    )
-
-    user_prompt = f"""
-TODAY:
-{TODAY}
-
-Here is the actual YouTube trend research collected from
-India and multiple major world markets:
-
-{trend_json}
-
-
-Create a COMPLETE YouTube IDEA INTELLIGENCE REPORT.
-
-The report must contain exactly these sections:
-
-============================================================
-SECTION 0 — HIGH CTR IDEA OF THE DAY
-============================================================
-
-Give 5 exceptional ideas.
-
-These are the strongest concepts in the entire report.
-
-For each:
-
-TITLE:
-HOOK:
-CORE IDEA:
-ROMAN TELUGU LOGLINE:
-WHY THIS HAS HIGH CTR:
-FIRST 10 SECONDS:
-PAYOFF:
-PRODUCTION DIFFICULTY:
-
-Do not choose an idea merely because it resembles a current trend.
-
-Choose concepts with exceptional curiosity.
-
-============================================================
-SECTION 1 — INDIA YOUTUBE TRENDS
-============================================================
-
-A. India Shorts Trends
-
-Give:
-- major patterns
-- recurring hooks
-- recurring subjects
-- audience curiosity patterns
-- format patterns
-- genre patterns
-
-Then give 10 strong Shorts concepts inspired by these patterns.
-
-B. India Longform 8-10 Minute Trends
-
-Analyze:
-- topics
-- formats
-- hooks
-- storytelling structures
-- genres
-
-Then give 10 strong 8-10 minute concepts.
-
-============================================================
-SECTION 2 — WORLD YOUTUBE TRENDS
-============================================================
-
-A. World Shorts Trends
-
-Analyze major patterns.
-
-Then give 10 strong Shorts concepts.
-
-B. World Longform 8-10 Minute Trends
-
-Analyze major patterns.
-
-Then give 10 strong 8-10 minute concepts.
-
-============================================================
-SECTION 3 — YOUTUBE GENRE TRENDS
-============================================================
-
-Analyze the genre data.
-
-Separate:
-
-Shorts:
-- strongest genres
-- emerging combinations
-- interesting genre crossovers
-
-Longform:
-- strongest genres
-- emerging combinations
-- interesting genre crossovers
-
-Then give:
-5 Shorts concepts
-5 Longform concepts
-
-============================================================
-SECTION 4 — INDIA/WORLD TREND-BASED SHORTS
-============================================================
-
-Use actual trend patterns from the research.
-
-Do NOT copy existing videos.
-
-Transform trend signals into ORIGINAL concepts.
-
-Give 15 ideas.
-
-For every idea provide:
-
-TITLE:
-HOOK:
-CORE CONCEPT:
-ROMAN TELUGU LOGLINE:
-WHY PEOPLE WILL CLICK:
-FIRST 3 SECONDS:
-PAYOFF:
-
-============================================================
-SECTION 5 — INDIA/WORLD TREND-BASED LONGFORM
-============================================================
-
-Use actual trend signals.
-
-Do NOT copy existing videos.
-
-Create original 8-10 minute concepts.
-
-Give 15 ideas.
-
-For every idea provide:
-
-TITLE:
-HOOK:
-CORE CONCEPT:
-ROMAN TELUGU LOGLINE:
-WHY PEOPLE WILL WATCH:
-OPENING:
-STORY ESCALATION:
-PAYOFF:
-
-============================================================
-SECTION 6 — GENERAL ORIGINAL SHORTS
-============================================================
-
-These must NOT depend on current YouTube trends.
-
-They must be original concepts based on universal human
-curiosity, psychology, mystery, comedy, thriller, technology,
-social situations, unexpected consequences, etc.
-
-Give 15 ideas.
-
-The ideas should work even if today's trends disappear.
-
-For every idea provide:
-
-TITLE:
-HOOK:
-CORE CONCEPT:
-ROMAN TELUGU LOGLINE:
-WHY PEOPLE WILL CLICK:
-PAYOFF:
-
-============================================================
-SECTION 7 — GENERAL ORIGINAL LONGFORM
-============================================================
-
-These must NOT depend on current YouTube trends.
-
-Give 15 ORIGINAL 8-10 minute concepts.
-
-Strong preference for concepts that can be produced by a
-small creator.
-
-For every idea provide:
-
-TITLE:
-HOOK:
-CORE CONCEPT:
-ROMAN TELUGU LOGLINE:
-8-10 MINUTE STORY STRUCTURE:
-OPENING:
-ESCALATION:
-REVEAL:
-ENDING:
-WHY PEOPLE WILL WATCH:
-
-============================================================
-FINAL QUALITY FILTER
-============================================================
-
-Before returning the report, silently remove every concept that
-is:
-
-- generic
-- predictable
-- childish
-- low curiosity
-- obvious clickbait
-- expensive without reason
-- copied
-- too similar to another concept
-- impossible to explain clearly
-- dependent on a famous creator
-- just a normal activity with a dramatic title
-
-The final report should feel like a professional YouTube
-creative director prepared it for a creator who wants people to
-say:
-
-"WAH... WHAT A CONCEPT."
-
-Do not apologize.
-Do not explain these instructions.
-Just provide the final report.
+Then generate the full report.
 """
 
     print()
-    print("=" * 70)
-    print("GENERATING HIGH-QUALITY AI IDEAS")
-    print("=" * 70)
+    print("==============================================")
+    print("STARTING YOUTUBE IDEA INTELLIGENCE")
+    print("==============================================")
     print()
 
-    return openrouter_generate(
-        SYSTEM_PROMPT,
-        user_prompt,
-        temperature=0.88,
-        max_tokens=16000
-    )
-
-
-# ============================================================
-# SAVE JSON TREND DATA
-# ============================================================
-
-def save_trend_data(context):
-
-    output_file = DATA_DIR / (
-        f"youtube_trends_{TODAY}.json"
-    )
-
-    with open(
-        output_file,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            context,
-            file,
-            indent=2,
-            ensure_ascii=False
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTION,
+            temperature=1.0,
+            max_output_tokens=30000
         )
-
-    print(
-        f"✓ Trend data saved: {output_file}"
     )
 
+    if not response or not response.text:
+        raise RuntimeError("Gemini returned an empty response.")
 
-# ============================================================
-# SAVE AI REPORT
-# ============================================================
+    return clean_text(response.text)
+
 
 def save_report(report):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    markdown_file = SUMMARY_DIR / (
-        f"youtube_idea_report_{TODAY}.md"
+    txt_file = OUTPUT_DIR / f"youtube_idea_report_{timestamp}.txt"
+    json_file = OUTPUT_DIR / f"youtube_idea_report_{timestamp}.json"
+
+    txt_file.write_text(
+        report,
+        encoding="utf-8"
     )
 
-    text_file = SUMMARY_DIR / (
-        f"youtube_idea_report_{TODAY}.txt"
+    metadata = {
+        "generated_at": datetime.now().isoformat(),
+        "model": MODEL_NAME,
+        "report_file": str(txt_file),
+        "type": "youtube_idea_intelligence"
+    }
+
+    json_file.write_text(
+        json.dumps(metadata, indent=2),
+        encoding="utf-8"
     )
 
-    with open(
-        markdown_file,
-        "w",
-        encoding="utf-8"
-    ) as file:
+    return txt_file, json_file
 
-        file.write(
-            "# YOUTUBE TREND INTELLIGENCE + IDEA GENERATOR\n\n"
-        )
-
-        file.write(
-            f"Generated: {TODAY}\n\n"
-        )
-
-        file.write(report)
-
-    with open(
-        text_file,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        file.write(
-            "YOUTUBE TREND INTELLIGENCE + IDEA GENERATOR\n"
-        )
-
-        file.write(
-            f"Generated: {TODAY}\n"
-        )
-
-        file.write(
-            "=" * 70
-            + "\n\n"
-        )
-
-        file.write(report)
-
-    print()
-    print("=" * 70)
-    print("REPORT SAVED")
-    print("=" * 70)
-
-    print(f"Markdown: {markdown_file}")
-    print(f"Text   : {text_file}")
-
-    return markdown_file, text_file
-
-
-# ============================================================
-# MAIN
-# ============================================================
 
 def main():
+    try:
+        report = generate_report()
 
-    start_time = time.time()
+        txt_file, json_file = save_report(report)
 
-    print("=" * 70)
-    print("YOUTUBE TREND INTELLIGENCE + IDEA GENERATOR")
-    print("=" * 70)
+        print()
+        print("==============================================")
+        print("IDEA GENERATION COMPLETED")
+        print("==============================================")
+        print()
+        print(f"Report: {txt_file}")
+        print(f"Metadata: {json_file}")
+        print()
 
-    print()
-    print(f"Project root : {BASE_DIR}")
-    print(f"Data folder  : {DATA_DIR}")
-    print(f"Summary      : {SUMMARY_DIR}")
-    print(f"Generated    : {TODAY}")
-    print(f"AI Model     : {OPENROUTER_MODEL}")
+        print(report)
 
-    require_environment()
-
-    # --------------------------------------------------------
-    # INDIA
-    # --------------------------------------------------------
-
-    india = collect_india_trends()
-
-    print()
-    print(
-        f"India Shorts collected   : "
-        f"{len(india['shorts'])}"
-    )
-
-    print(
-        f"India Longform collected : "
-        f"{len(india['longform'])}"
-    )
-
-    # --------------------------------------------------------
-    # WORLD
-    # --------------------------------------------------------
-
-    world = collect_world_trends()
-
-    print()
-    print(
-        f"World Shorts collected   : "
-        f"{len(world['shorts'])}"
-    )
-
-    print(
-        f"World Longform collected : "
-        f"{len(world['longform'])}"
-    )
-
-    # --------------------------------------------------------
-    # BUILD CONTEXT
-    # --------------------------------------------------------
-
-    trend_context = build_trend_context(
-        india,
-        world
-    )
-
-    save_trend_data(
-        trend_context
-    )
-
-    # --------------------------------------------------------
-    # AI
-    # --------------------------------------------------------
-
-    report = generate_ideas(
-        trend_context
-    )
-
-    # --------------------------------------------------------
-    # SAVE
-    # --------------------------------------------------------
-
-    save_report(report)
-
-    elapsed = time.time() - start_time
-
-    print()
-    print("=" * 70)
-    print("COMPLETED SUCCESSFULLY")
-    print("=" * 70)
-
-    print(
-        f"Execution time: {elapsed:.1f} seconds"
-    )
-
-    print()
-    print(
-        "✓ YouTube trend research completed"
-    )
-
-    print(
-        "✓ India trends analyzed"
-    )
-
-    print(
-        "✓ World trends analyzed"
-    )
-
-    print(
-        "✓ Genre trends analyzed"
-    )
-
-    print(
-        "✓ Shorts ideas generated"
-    )
-
-    print(
-        "✓ 8-10 minute ideas generated"
-    )
-
-    print(
-        "✓ Roman Telugu loglines generated"
-    )
-
-    print(
-        "✓ High CTR ideas generated"
-    )
-
-    print()
+    except Exception as e:
+        print()
+        print("==============================================")
+        print("ERROR")
+        print("==============================================")
+        print()
+        print(str(e))
+        raise
 
 
 if __name__ == "__main__":

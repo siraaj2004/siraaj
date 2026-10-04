@@ -1,554 +1,1759 @@
 import os
-import json
 import re
-from datetime import datetime
-from pathlib import Path
+import json
+import time
+from datetime import datetime, timezone
+from collections import Counter
 
+import requests
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
 
+
+# ============================================================
+# LOAD ENVIRONMENT
+# ============================================================
 
 load_dotenv()
 
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL", "").strip()
 
-if not GEMINI_API_KEY:
-    raise RuntimeError(
-        "GEMINI_API_KEY is missing. Add GEMINI_API_KEY to your .env file."
+SENDER_EMAIL = os.getenv(
+    "SENDER_EMAIL",
+    "onboarding@resend.dev"
+).strip()
+
+OPENROUTER_MODEL = os.getenv(
+    "OPENROUTER_MODEL",
+    "google/gemini-2.5-flash"
+).strip()
+
+
+# ============================================================
+# API URLS
+# ============================================================
+
+YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+RESEND_URL = "https://api.resend.com/emails"
+
+
+# ============================================================
+# WORLD REGIONS
+# ============================================================
+
+WORLD_REGIONS = [
+    "US",
+    "GB",
+    "CA",
+    "AU",
+    "JP",
+    "KR",
+    "BR",
+    "DE",
+    "FR",
+    "MX"
+]
+
+
+# ============================================================
+# YOUTUBE CATEGORY NAMES
+# ============================================================
+
+CATEGORY_NAMES = {
+    "1": "Film and Animation",
+    "2": "Autos and Vehicles",
+    "10": "Music",
+    "15": "Pets and Animals",
+    "17": "Sports",
+    "19": "Travel and Events",
+    "20": "Gaming",
+    "22": "People and Blogs",
+    "23": "Comedy",
+    "24": "Entertainment",
+    "25": "News and Politics",
+    "26": "Howto and Style",
+    "27": "Education",
+    "28": "Science and Technology",
+    "29": "Nonprofits and Activism",
+}
+
+
+# ============================================================
+# VALIDATE ENVIRONMENT
+# ============================================================
+
+def check_environment():
+
+    required = {
+        "YOUTUBE_API_KEY": YOUTUBE_API_KEY,
+        "OPENROUTER_API_KEY": OPENROUTER_API_KEY,
+        "RESEND_API_KEY": RESEND_API_KEY,
+        "RECIPIENT_EMAIL": RECIPIENT_EMAIL,
+    }
+
+    missing = [
+        key
+        for key, value in required.items()
+        if not value
+    ]
+
+    if missing:
+
+        raise RuntimeError(
+            "Missing environment variables:\n"
+            + "\n".join(missing)
+        )
+
+    print("Environment check: OK")
+
+
+# ============================================================
+# YOUTUBE API
+# ============================================================
+
+def youtube_request(endpoint, params):
+
+    params = dict(params)
+
+    params["key"] = YOUTUBE_API_KEY
+
+    response = requests.get(
+        f"{YOUTUBE_API_URL}/{endpoint}",
+        params=params,
+        timeout=40
     )
 
+    if response.status_code != 200:
 
-MODEL_NAME = os.getenv(
-    "GEMINI_MODEL",
-    "gemini-3.8-flash"
-)
+        try:
+            error = response.json()
+        except Exception:
+            error = response.text
+
+        raise RuntimeError(
+            f"YouTube API error {response.status_code}: {error}"
+        )
+
+    return response.json()
 
 
-OUTPUT_DIR = Path("data")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+# ============================================================
+# GET TRENDING VIDEOS
+# ============================================================
+
+def get_trending_videos(
+    region_code,
+    max_results=50
+):
+
+    data = youtube_request(
+        "videos",
+        {
+            "part": "snippet,statistics,contentDetails",
+            "chart": "mostPopular",
+            "regionCode": region_code,
+            "maxResults": max_results,
+        }
+    )
+
+    videos = []
+
+    for item in data.get("items", []):
+
+        snippet = item.get(
+            "snippet",
+            {}
+        )
+
+        statistics = item.get(
+            "statistics",
+            {}
+        )
+
+        content = item.get(
+            "contentDetails",
+            {}
+        )
+
+        videos.append({
+
+            "id": item.get(
+                "id",
+                ""
+            ),
+
+            "title": snippet.get(
+                "title",
+                ""
+            ),
+
+            "description": snippet.get(
+                "description",
+                ""
+            )[:500],
+
+            "channel": snippet.get(
+                "channelTitle",
+                ""
+            ),
+
+            "published_at": snippet.get(
+                "publishedAt",
+                ""
+            ),
+
+            "category_id": snippet.get(
+                "categoryId",
+                ""
+            ),
+
+            "category": CATEGORY_NAMES.get(
+                snippet.get(
+                    "categoryId",
+                    ""
+                ),
+                "Other"
+            ),
+
+            "views": int(
+                statistics.get(
+                    "viewCount",
+                    0
+                ) or 0
+            ),
+
+            "likes": int(
+                statistics.get(
+                    "likeCount",
+                    0
+                ) or 0
+            ),
+
+            "comments": int(
+                statistics.get(
+                    "commentCount",
+                    0
+                ) or 0
+            ),
+
+            "duration": content.get(
+                "duration",
+                ""
+            ),
+
+            "region": region_code
+        })
+
+    return videos
 
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+# ============================================================
+# INDIA DATA
+# ============================================================
+
+def collect_india_trends():
+
+    print()
+    print("Collecting India YouTube trends...")
+
+    videos = get_trending_videos(
+        "IN",
+        50
+    )
+
+    print(
+        f"India videos collected: {len(videos)}"
+    )
+
+    return videos
 
 
-SYSTEM_INSTRUCTION = """
-You are an elite YouTube trend strategist, viral content researcher,
-creative director, screenwriter and audience psychology expert.
+# ============================================================
+# WORLD DATA
+# ============================================================
 
-Your job is NOT to produce random YouTube ideas.
+def collect_world_trends():
 
-Your job is to identify concepts that make a viewer immediately think:
+    print()
+    print("Collecting World YouTube trends...")
 
-"WAH... WHAT AN IDEA."
+    all_videos = []
 
-The concepts must have strong curiosity, emotional tension, novelty,
-clear audience appeal and a reason to click.
+    for region in WORLD_REGIONS:
 
-You are generating ideas for an Indian creator who can create:
-1. YouTube Shorts
-2. YouTube long form videos around 8 to 10 minutes
+        try:
 
-The creator prefers:
-- Thriller
-- Mystery
-- Suspense
-- Psychological concepts
-- Unexpected situations
-- Real life curiosity
-- Technology
-- AI
-- Internet culture
-- Human behaviour
-- Indian relatable situations
-- Strong twists
-- Comedy mixed with serious build up when appropriate
-- Concepts that can be filmed with limited resources
+            videos = get_trending_videos(
+                region,
+                30
+            )
 
-Do NOT assume every idea needs expensive production.
+            all_videos.extend(videos)
 
-VERY IMPORTANT:
+            print(
+                f"{region}: {len(videos)} videos"
+            )
 
-Do not generate silly ideas.
+            time.sleep(0.2)
 
-Do not generate childish prank concepts.
+        except Exception as error:
 
-Do not generate generic "try this challenge" ideas.
+            print(
+                f"{region} skipped: {error}"
+            )
 
-Do not generate ordinary reaction videos.
+    unique_videos = {}
 
-Do not generate generic motivation.
+    for video in all_videos:
 
-Do not generate generic facts videos.
+        video_id = video.get(
+            "id"
+        )
 
-Do not generate concepts that have already been repeated thousands of times
-unless there is a genuinely new angle.
+        if video_id:
 
-Do not simply change the title of an old idea.
+            unique_videos[
+                video_id
+            ] = video
 
-Every idea should contain a strong underlying concept.
+    videos = list(
+        unique_videos.values()
+    )
+
+    print(
+        f"Unique world videos: {len(videos)}"
+    )
+
+    return videos
+
+
+# ============================================================
+# TREND ANALYSIS
+# ============================================================
+
+def analyze_trends(
+    videos,
+    region_name
+):
+
+    category_counter = Counter()
+
+    keyword_counter = Counter()
+
+    for video in videos:
+
+        category = video.get(
+            "category",
+            "Other"
+        )
+
+        category_counter[
+            category
+        ] += 1
+
+        title = video.get(
+            "title",
+            ""
+        )
+
+        title = re.sub(
+            r"[^A-Za-z0-9\s]",
+            " ",
+            title.lower()
+        )
+
+        stopwords = {
+            "the",
+            "and",
+            "for",
+            "with",
+            "this",
+            "that",
+            "you",
+            "your",
+            "from",
+            "are",
+            "was",
+            "will",
+            "what",
+            "when",
+            "where",
+            "how",
+            "why",
+            "new",
+            "video",
+            "official",
+            "part",
+            "episode",
+            "india",
+            "a",
+            "an",
+            "to",
+            "of",
+            "in",
+            "on",
+            "is",
+            "it",
+            "my",
+            "we",
+            "i"
+        }
+
+        for word in title.split():
+
+            if (
+                len(word) >= 4
+                and word not in stopwords
+            ):
+
+                keyword_counter[
+                    word
+                ] += 1
+
+    top_videos = sorted(
+        videos,
+        key=lambda x: (
+            x.get(
+                "views",
+                0
+            ),
+            x.get(
+                "likes",
+                0
+            )
+        ),
+        reverse=True
+    )[:30]
+
+    return {
+
+        "region": region_name,
+
+        "video_count": len(videos),
+
+        "top_videos": [
+
+            {
+                "title": video.get(
+                    "title",
+                    ""
+                ),
+
+                "channel": video.get(
+                    "channel",
+                    ""
+                ),
+
+                "category": video.get(
+                    "category",
+                    ""
+                ),
+
+                "views": video.get(
+                    "views",
+                    0
+                ),
+
+                "likes": video.get(
+                    "likes",
+                    0
+                ),
+
+                "comments": video.get(
+                    "comments",
+                    0
+                ),
+
+                "region": video.get(
+                    "region",
+                    ""
+                )
+            }
+
+            for video in top_videos
+        ],
+
+        "top_genres":
+            category_counter.most_common(
+                10
+            ),
+
+        "title_keywords":
+            keyword_counter.most_common(
+                40
+            )
+    }
+
+
+# ============================================================
+# OPENROUTER AI
+# ============================================================
+
+def call_openrouter(
+    system_prompt,
+    user_prompt
+):
+
+    headers = {
+
+        "Authorization":
+            f"Bearer {OPENROUTER_API_KEY}",
+
+        "Content-Type":
+            "application/json",
+
+        "HTTP-Referer":
+            "https://github.com/",
+
+        "X-Title":
+            "YouTube High CTR Idea Generator"
+    }
+
+    payload = {
+
+        "model":
+            OPENROUTER_MODEL,
+
+        "temperature":
+            0.9,
+
+        "max_tokens":
+            16000,
+
+        "messages": [
+
+            {
+                "role":
+                    "system",
+
+                "content":
+                    system_prompt
+            },
+
+            {
+                "role":
+                    "user",
+
+                "content":
+                    user_prompt
+            }
+        ]
+    }
+
+    response = requests.post(
+
+        OPENROUTER_URL,
+
+        headers=headers,
+
+        json=payload,
+
+        timeout=180
+    )
+
+    if response.status_code != 200:
+
+        try:
+            error = response.json()
+
+        except Exception:
+            error = response.text
+
+        raise RuntimeError(
+            f"OpenRouter error "
+            f"{response.status_code}: "
+            f"{error}"
+        )
+
+    data = response.json()
+
+    content = (
+        data
+        .get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+        .strip()
+    )
+
+    if not content:
+
+        raise RuntimeError(
+            "OpenRouter returned empty response."
+        )
+
+    # Remove accidental markdown JSON fences.
+    content = re.sub(
+        r"^```json\s*",
+        "",
+        content,
+        flags=re.IGNORECASE
+    )
+
+    content = re.sub(
+        r"^```\s*",
+        "",
+        content
+    )
+
+    content = re.sub(
+        r"\s*```$",
+        "",
+        content
+    )
+
+    try:
+
+        return json.loads(
+            content
+        )
+
+    except json.JSONDecodeError:
+
+        match = re.search(
+            r"\{.*\}",
+            content,
+            flags=re.DOTALL
+        )
+
+        if match:
+
+            return json.loads(
+                match.group(0)
+            )
+
+        raise RuntimeError(
+            "AI returned invalid JSON.\n\n"
+            + content[:5000]
+        )
+
+
+# ============================================================
+# GENERATE IDEAS
+# ============================================================
+
+def generate_ideas(
+    india_data,
+    world_data
+):
+
+    system_prompt = """
+
+You are an elite YouTube creative director,
+viral-content strategist and story-concept developer.
+
+Your standard is extremely high.
+
+The user does NOT want ordinary YouTube ideas.
+
+The desired reaction is:
+
+"WAAH... WHAT AN IDEA!"
+
+The concept must immediately create curiosity.
+
+Do NOT produce silly ideas.
+
+Do NOT produce generic creator advice.
+
+Do NOT produce concepts such as:
+
+"I tried this for 24 hours."
+
+"I asked strangers..."
+
+"Funny reactions."
+
+"Random prank."
+
+"Morning routine."
+
+"Day in my life."
+
+"Challenge video."
+
+"Reacting to..."
+
+"Top 10..."
+
+"Things you didn't know..."
+
+"Random experiment."
+
+"Generic mystery."
+
+"Generic haunted house."
+
+"Generic social experiment."
+
+"Generic AI challenge."
+
+Do not copy famous creators.
+
+Do not simply change the location of an existing viral idea.
+
+Every concept needs a UNIQUE CENTRAL PREMISE.
 
 The viewer should understand why they need to click.
 
-The first few seconds should create curiosity.
+The concept should have a powerful curiosity gap.
 
-For long form, the concept must have enough story, escalation and payoff
-to sustain approximately 8 to 10 minutes.
+The idea must contain:
 
-For Shorts, the concept must have a powerful hook and fast escalation.
+1. Strong opening hook
+2. Curiosity
+3. Escalation
+4. Conflict or mystery
+5. A meaningful payoff
+6. A memorable final moment
 
-Roman Telugu must feel natural and conversational.
+For Shorts:
 
-Do not translate English word by word.
+The first 1 to 3 seconds must be extremely strong.
 
-Use natural Roman Telugu mixed with commonly used English words.
+The concept must work within a short runtime.
 
-Example style:
+For 8 to 10 minute videos:
 
-"Morning lechi phone open chesthe, ninna night nenu delete chesina
-photo malli gallery lo kanipinchindi. Kaani aa photo lo nenu asalu
-eppudu vellani place kanipisthundi."
+Create a genuine story engine.
 
-This is only an example of writing style.
+There must be enough material for:
 
-Do not copy this example.
+Opening
+Setup
+Discovery
+Escalation
+Complication
+Turning point
+Reveal
+Payoff
 
-Each concept must feel like a real video someone would genuinely want
-to watch.
+Do not stretch a 30-second idea into 10 minutes.
 
-Think like:
-MrBeast level curiosity,
-Netflix level premise,
-Indian audience relatability,
-Shorts level hook,
-and independent creator practicality.
+ROMAN TELUGU:
 
-But do not copy any creator.
+Write natural conversational Roman Telugu.
+
+Do not translate word-for-word.
+
+The logline should sound like something a Telugu filmmaker or YouTube creator
+would actually say.
+
+HIGH CTR:
+
+The title should create curiosity without lying.
+
+Do not use fake clickbait.
+
+IMPORTANT:
+
+Sections 4 and 5 must be inspired by the supplied current YouTube trend data.
+
+Sections 6 and 7 must be ORIGINAL and must NOT depend on current trend titles.
+
+They may use universal human psychology, mystery, technology, Indian life,
+relationships, fear, ambition, secrets, social behavior, unexpected systems,
+science, money, history, or other strong concepts.
+
+The final winner must be selected from ALL generated ideas.
+
+It must be the strongest concept in the entire report.
+
+Return ONLY valid JSON.
+
+No markdown.
+
+No explanations outside JSON.
 """
 
+    current_date = datetime.now(
+        timezone.utc
+    ).strftime("%Y-%m-%d")
 
-USER_REQUIREMENTS = """
-Create a complete YouTube Idea Intelligence Report.
+    user_prompt = f"""
 
-The report must contain exactly these seven major sections.
+TODAY:
+
+{current_date}
+
+
+INDIA YOUTUBE TREND DATA:
+
+{json.dumps(
+    india_data,
+    ensure_ascii=False
+)}
+
+
+WORLD YOUTUBE TREND DATA:
+
+{json.dumps(
+    world_data,
+    ensure_ascii=False
+)}
+
+
+CREATE THIS REPORT:
+
+
+HIGH CTR WINNER
+
+Select the single strongest idea from the entire report.
+
+Return:
+
+title
+
+format
+
+region
+
+ctr_score
+
+roman_telugu_logline
+
+why_this_is_the_winner
+
 
 SECTION 1
-INDIA YOUTUBE TRENDS
+
+India YouTube trends.
 
 Separate:
-A. India YouTube long form trends for 8 to 10 minute videos
-B. India YouTube Shorts trends
 
-For each trend explain:
-- Trend
-- Why it is working
-- Audience psychology
-- Possible opportunity
-- Saturation level
-- How a small creator can use it
+Longform 8-10 minutes
+
+Shorts
 
 
 SECTION 2
-WORLD YOUTUBE TRENDS
+
+World YouTube trends.
 
 Separate:
-A. World YouTube long form trends for 8 to 10 minute videos
-B. World YouTube Shorts trends
 
-For each trend explain:
-- Trend
-- Why it is working
-- Audience psychology
-- Opportunity for Indian creators
-- Saturation
-- Adaptation possibility
+Longform 8-10 minutes
+
+Shorts
 
 
 SECTION 3
-YOUTUBE GENRE TRENDS
 
-Analyze important YouTube genres separately for:
-A. Long form 8 to 10 minutes
-B. Shorts
+YouTube genre trends.
 
-Consider genres such as:
-- Thriller
-- Mystery
-- Comedy
-- Technology
-- AI
-- Psychology
-- Human behaviour
-- Storytelling
-- Experiments
-- Internet mysteries
-- Social experiments
-- Documentary style
-- Horror
-- Finance
-- Education
-- Lifestyle
-- Entertainment
+Separate:
 
-Do not force all genres to be equally important.
+Longform
 
-Identify the strongest opportunities.
+Shorts
 
 
 SECTION 4
-INDIA AND WORLD TREND BASED SHORTS IDEAS
 
-Generate highly engaging Shorts ideas based specifically on the trends
-identified in Sections 1, 2 and 3.
+Trend-based Shorts ideas.
 
-Give 20 ideas.
+Generate 10.
 
-Every idea must contain:
+Mix India and World.
 
-Idea Number
-High CTR Title
-Hook
-Core Concept
-Roman Telugu Logline
-Why People Will Click
-Why It Can Retain Viewers
-Production Difficulty
-Trend Used
-CTR Score out of 100
-Virality Score out of 100
-Originality Score out of 100
+Each idea must include:
 
-The Roman Telugu logline must be especially engaging.
+title
 
-It should sound like a movie premise compressed into a Shorts concept.
+region
 
-Avoid silly ideas.
+format
+
+target_audience
+
+why_people_click
+
+core_hook
+
+roman_telugu_logline
+
+story_payoff
+
+ctr_score
+
+originality_score
 
 
 SECTION 5
-INDIA AND WORLD TREND BASED LONG FORM IDEAS
 
-Generate 20 highly engaging long form ideas.
+Trend-based 8-10 minute longform ideas.
 
-Each must work for an 8 to 10 minute video.
+Generate 10.
 
-Every idea must contain:
+Mix India and World.
 
-Idea Number
-High CTR Title
-Thumbnail Concept
-Opening Hook
-Core Premise
-Story Structure
-Roman Telugu Logline
-Escalation
-Twist or Payoff
-Why People Will Click
-Why People Will Watch Until The End
-Production Difficulty
-Trend Used
-CTR Score out of 100
-Retention Score out of 100
-Originality Score out of 100
+Each idea must include:
 
-The concepts must have enough story to support 8 to 10 minutes.
+title
 
-Avoid simple list videos unless the concept itself is exceptionally strong.
+region
+
+format
+
+target_audience
+
+why_people_click
+
+core_hook
+
+roman_telugu_logline
+
+story_payoff
+
+ctr_score
+
+originality_score
 
 
 SECTION 6
-INDIA AND WORLD GENERAL YOUTUBE IDEAS
-NOT BASED ON CURRENT TRENDS
-SHORTS
 
-Generate 20 original Shorts ideas.
+Original general Shorts ideas.
 
-These must NOT depend on currently trending topics.
+These MUST NOT be based on current YouTube trends.
 
-Use timeless human curiosity.
+Generate 10.
 
-Strong areas include:
-- Strange situations
-- Human psychology
-- Mystery
-- Everyday life
-- Technology
-- Relationships
-- Fear
-- Suspense
-- Unexpected consequences
-- Social behaviour
-- Hidden rules
-- Coincidences
-- Moral dilemmas
+Mix India and World.
 
-Every idea must contain:
+Each idea must include:
 
-High CTR Title
-Hook
-Concept
-Roman Telugu Logline
-Why It Is Interesting
-Why It Is Shareable
-CTR Score
-Originality Score
+title
+
+region
+
+format
+
+target_audience
+
+why_people_click
+
+core_hook
+
+roman_telugu_logline
+
+story_payoff
+
+ctr_score
+
+originality_score
 
 
 SECTION 7
-INDIA AND WORLD GENERAL YOUTUBE IDEAS
-NOT BASED ON CURRENT TRENDS
-LONG FORM 8 TO 10 MINUTES
 
-Generate 20 original long form concepts.
+Original general 8-10 minute longform ideas.
 
-These must NOT depend on current trends.
+These MUST NOT be based on current YouTube trends.
 
-They should have:
-- Strong premise
-- Escalation
-- Mystery or emotional tension
-- A payoff
-- Enough material for 8 to 10 minutes
-- Strong title potential
-- Strong thumbnail potential
+Generate 10.
 
-Every idea must contain:
+Mix India and World.
 
-High CTR Title
-Thumbnail Concept
-Opening Hook
-Core Premise
-8 to 10 Minute Story Structure
-Roman Telugu Logline
-Escalation
-Twist or Payoff
-Why People Will Click
-Why People Will Finish
-CTR Score
-Retention Score
-Originality Score
+Each idea must include:
+
+title
+
+region
+
+format
+
+target_audience
+
+why_people_click
+
+core_hook
+
+roman_telugu_logline
+
+story_payoff
+
+ctr_score
+
+originality_score
 
 
-VERY IMPORTANT FINAL RANKING
+JSON STRUCTURE:
 
-At the end create:
+{{
+    "high_ctr_winner": {{
+        "title": "",
+        "format": "",
+        "region": "",
+        "ctr_score": 0,
+        "roman_telugu_logline": "",
+        "why_this_is_the_winner": ""
+    }},
 
-TOP 10 HIGHEST CTR IDEAS
+    "india_youtube_trends": {{
+        "longform_8_10_min": {{
+            "trend_summary": "",
+            "top_patterns": [],
+            "genres": []
+        }},
+        "shorts": {{
+            "trend_summary": "",
+            "top_patterns": [],
+            "genres": []
+        }}
+    }},
 
-Rank the 10 strongest ideas from the entire report.
+    "world_youtube_trends": {{
+        "longform_8_10_min": {{
+            "trend_summary": "",
+            "top_patterns": [],
+            "genres": []
+        }},
+        "shorts": {{
+            "trend_summary": "",
+            "top_patterns": [],
+            "genres": []
+        }}
+    }},
 
-For each give:
+    "youtube_genre_trends": {{
+        "longform_8_10_min": [],
+        "shorts": []
+    }},
 
-Rank
-Title
-Format
-Roman Telugu Logline
-CTR Score
-Retention Score
-Originality Score
-Why This Is A Winner
+    "trend_based_shorts_ideas": [],
 
-The first 3 must be exceptional.
+    "trend_based_longform_ideas": [],
 
-Do not fill the report with mediocre ideas just to reach a number.
+    "general_shorts_ideas": [],
 
-If an idea is weak, replace it.
-
-QUALITY FILTER
-
-Before returning the final answer, internally score every idea.
-
-Reject an idea if:
-- It is generic
-- It feels childish
-- It feels copied
-- It has weak curiosity
-- It has no conflict
-- It has no escalation
-- It has no payoff
-- The title is not clickable
-- The Roman Telugu logline is boring
-- It cannot realistically retain viewers
-
-Only return ideas that survive the quality filter.
-
-Do not mention this internal filtering process in the final report.
-"""
-
-
-TREND_RESEARCH_PROMPT = """
-First perform deep current trend analysis using your available knowledge
-of YouTube and current internet culture.
-
-Focus on:
-India
-Global
-YouTube Shorts
-YouTube long form
-Major creator formats
-Emerging viewer interests
-Fast growing topics
-Audience psychology
-Content gaps
-Oversaturated formats
-Underused angles
-
-Important:
-
-Do not invent precise statistics.
-
-If exact current statistics are unavailable, describe the trend
-qualitatively instead of making up numbers.
-
-Prioritize recent developments but also distinguish temporary trends
-from durable audience behaviour.
-
-Then generate the complete report requested below.
+    "general_longform_ideas": []
+}}
 
 """
 
 
-def clean_text(text):
-    if not text:
+    return call_openrouter(
+        system_prompt,
+        user_prompt
+    )
+
+
+# ============================================================
+# REMOVE SYMBOLS
+# ============================================================
+
+def clean_text(value):
+
+    if value is None:
         return ""
 
-    replacements = {
-        "#": "",
-        "$": "",
-        "@": "",
-        "*": "",
-        "`": "",
-        "|": "",
-    }
+    if isinstance(value, list):
 
-    for old, new in replacements.items():
-        text = text.replace(old, new)
+        return ", ".join(
+            clean_text(item)
+            for item in value
+        )
 
-    text = re.sub(r"\n{4,}", "\n\n\n", text)
+    if isinstance(value, dict):
 
-    return text.strip()
+        return "; ".join(
+            f"{key}: {clean_text(val)}"
+            for key, val in value.items()
+        )
+
+    value = str(value)
+
+    value = value.replace(
+        "#",
+        ""
+    )
+
+    value = value.replace(
+        "$",
+        ""
+    )
+
+    value = value.replace(
+        "@",
+        ""
+    )
+
+    return value.strip()
 
 
-def generate_report():
-    prompt = f"""
-{TREND_RESEARCH_PROMPT}
+# ============================================================
+# FORMAT IDEA
+# ============================================================
 
-{USER_REQUIREMENTS}
+def format_idea(
+    number,
+    idea
+):
 
-IMPORTANT OUTPUT FORMAT
+    return f"""
 
-Return a clean professional report.
+{number}. {clean_text(idea.get("title"))}
 
-Do NOT use markdown symbols.
+Region: {clean_text(idea.get("region"))}
 
-Do NOT use:
-#
-*
-$
-@
-`
-|
+Format: {clean_text(idea.get("format"))}
 
-You may use:
+Target Audience: {clean_text(idea.get("target_audience"))}
 
-SECTION 1
-SECTION 2
-A.
-B.
-1.
-2.
-3.
+CTR Score: {clean_text(idea.get("ctr_score"))}/100
 
-Use plain text headings.
+Originality Score: {clean_text(idea.get("originality_score"))}/100
 
-Do not put the entire answer inside JSON.
+Why People Click:
+{clean_text(idea.get("why_people_click"))}
 
-Do not provide an introduction that wastes space.
+Core Hook:
+{clean_text(idea.get("core_hook"))}
 
-Start directly with:
+Roman Telugu Logline:
+{clean_text(idea.get("roman_telugu_logline"))}
 
-YOUTUBE IDEA INTELLIGENCE REPORT
+Story and Payoff:
+{clean_text(idea.get("story_payoff"))}
 
-Date: {datetime.now().strftime("%Y-%m-%d")}
-
-Then generate the full report.
 """
 
-    print()
-    print("==============================================")
-    print("STARTING YOUTUBE IDEA INTELLIGENCE")
-    print("==============================================")
-    print()
 
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            temperature=1.0,
-            max_output_tokens=30000
+# ============================================================
+# BUILD REPORT
+# ============================================================
+
+def build_report(
+    report,
+    india_data,
+    world_data
+):
+
+    lines = []
+
+    winner = report.get(
+        "high_ctr_winner",
+        {}
+    )
+
+    lines.append(
+        "HIGH CTR WINNER"
+    )
+
+    lines.append(
+        "=" * 70
+    )
+
+    lines.append(
+        f"TITLE: "
+        f"{clean_text(winner.get('title'))}"
+    )
+
+    lines.append(
+        f"FORMAT: "
+        f"{clean_text(winner.get('format'))}"
+    )
+
+    lines.append(
+        f"REGION: "
+        f"{clean_text(winner.get('region'))}"
+    )
+
+    lines.append(
+        f"CTR SCORE: "
+        f"{clean_text(winner.get('ctr_score'))}/100"
+    )
+
+    lines.append(
+        "ROMAN TELUGU LOGLINE:"
+    )
+
+    lines.append(
+        clean_text(
+            winner.get(
+                "roman_telugu_logline"
+            )
         )
     )
 
-    if not response or not response.text:
-        raise RuntimeError("Gemini returned an empty response.")
-
-    return clean_text(response.text)
-
-
-def save_report(report):
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    txt_file = OUTPUT_DIR / f"youtube_idea_report_{timestamp}.txt"
-    json_file = OUTPUT_DIR / f"youtube_idea_report_{timestamp}.json"
-
-    txt_file.write_text(
-        report,
-        encoding="utf-8"
+    lines.append(
+        "WHY THIS IS THE WINNER:"
     )
 
-    metadata = {
-        "generated_at": datetime.now().isoformat(),
-        "model": MODEL_NAME,
-        "report_file": str(txt_file),
-        "type": "youtube_idea_intelligence"
+    lines.append(
+        clean_text(
+            winner.get(
+                "why_this_is_the_winner"
+            )
+        )
+    )
+
+
+    # --------------------------------------------------------
+    # INDIA
+    # --------------------------------------------------------
+
+    lines.extend([
+        "",
+        "",
+        "1. INDIA YOUTUBE TRENDS",
+        "=" * 70
+    ])
+
+    india = report.get(
+        "india_youtube_trends",
+        {}
+    )
+
+    for key, title in [
+        (
+            "longform_8_10_min",
+            "INDIA LONGFORM 8-10 MINUTES"
+        ),
+        (
+            "shorts",
+            "INDIA SHORTS"
+        )
+    ]:
+
+        section = india.get(
+            key,
+            {}
+        )
+
+        lines.extend([
+
+            "",
+            title,
+
+            "Trend Summary:",
+            clean_text(
+                section.get(
+                    "trend_summary"
+                )
+            ),
+
+            "Top Patterns:",
+            clean_text(
+                section.get(
+                    "top_patterns",
+                    []
+                )
+            ),
+
+            "Genres:",
+            clean_text(
+                section.get(
+                    "genres",
+                    []
+                )
+            )
+        ])
+
+
+    # --------------------------------------------------------
+    # WORLD
+    # --------------------------------------------------------
+
+    lines.extend([
+        "",
+        "",
+        "2. WORLD YOUTUBE TRENDS",
+        "=" * 70
+    ])
+
+    world = report.get(
+        "world_youtube_trends",
+        {}
+    )
+
+    for key, title in [
+        (
+            "longform_8_10_min",
+            "WORLD LONGFORM 8-10 MINUTES"
+        ),
+        (
+            "shorts",
+            "WORLD SHORTS"
+        )
+    ]:
+
+        section = world.get(
+            key,
+            {}
+        )
+
+        lines.extend([
+
+            "",
+            title,
+
+            "Trend Summary:",
+            clean_text(
+                section.get(
+                    "trend_summary"
+                )
+            ),
+
+            "Top Patterns:",
+            clean_text(
+                section.get(
+                    "top_patterns",
+                    []
+                )
+            ),
+
+            "Genres:",
+            clean_text(
+                section.get(
+                    "genres",
+                    []
+                )
+            )
+        ])
+
+
+    # --------------------------------------------------------
+    # GENRES
+    # --------------------------------------------------------
+
+    lines.extend([
+        "",
+        "",
+        "3. YOUTUBE GENRE TRENDS",
+        "=" * 70
+    ])
+
+    genres = report.get(
+        "youtube_genre_trends",
+        {}
+    )
+
+    lines.extend([
+
+        "Longform 8-10 Minutes:",
+
+        clean_text(
+            genres.get(
+                "longform_8_10_min",
+                []
+            )
+        ),
+
+        "",
+
+        "Shorts:",
+
+        clean_text(
+            genres.get(
+                "shorts",
+                []
+            )
+        )
+    ])
+
+
+    # --------------------------------------------------------
+    # IDEA SECTIONS
+    # --------------------------------------------------------
+
+    sections = [
+
+        (
+            "4. TREND BASED SHORTS IDEAS",
+            "trend_based_shorts_ideas"
+        ),
+
+        (
+            "5. TREND BASED LONGFORM IDEAS",
+            "trend_based_longform_ideas"
+        ),
+
+        (
+            "6. GENERAL SHORTS IDEAS NOT BASED ON CURRENT TRENDS",
+            "general_shorts_ideas"
+        ),
+
+        (
+            "7. GENERAL LONGFORM IDEAS NOT BASED ON CURRENT TRENDS",
+            "general_longform_ideas"
+        )
+    ]
+
+
+    for section_title, key in sections:
+
+        lines.extend([
+            "",
+            "",
+            section_title,
+            "=" * 70
+        ])
+
+        ideas = report.get(
+            key,
+            []
+        )
+
+        for index, idea in enumerate(
+            ideas,
+            start=1
+        ):
+
+            lines.append(
+                format_idea(
+                    index,
+                    idea
+                )
+            )
+
+
+    # --------------------------------------------------------
+    # DATA SUMMARY
+    # --------------------------------------------------------
+
+    lines.extend([
+
+        "",
+        "",
+        "TREND DATA SUMMARY",
+        "=" * 70,
+
+        f"India videos analyzed: "
+        f"{india_data.get('video_count', 0)}",
+
+        f"World videos analyzed: "
+        f"{world_data.get('video_count', 0)}",
+
+        "India top genres:",
+
+        clean_text(
+            india_data.get(
+                "top_genres",
+                []
+            )
+        ),
+
+        "World top genres:",
+
+        clean_text(
+            world_data.get(
+                "top_genres",
+                []
+            )
+        )
+    ])
+
+
+    return "\n".join(lines)
+
+
+# ============================================================
+# RESEND EMAIL
+# ============================================================
+
+def send_resend_email(
+    subject,
+    report
+):
+
+    headers = {
+
+        "Authorization":
+            f"Bearer {RESEND_API_KEY}",
+
+        "Content-Type":
+            "application/json"
     }
 
-    json_file.write_text(
-        json.dumps(metadata, indent=2),
-        encoding="utf-8"
+
+    html_report = clean_text(
+        report
     )
 
-    return txt_file, json_file
+    html_report = (
+        html_report
+        .replace(
+            "&",
+            "&amp;"
+        )
+        .replace(
+            "<",
+            "&lt;"
+        )
+        .replace(
+            ">",
+            "&gt;"
+        )
+        .replace(
+            "\n",
+            "<br>"
+        )
+    )
 
+
+    payload = {
+
+        "from":
+            SENDER_EMAIL,
+
+        "to": [
+            RECIPIENT_EMAIL
+        ],
+
+        "subject":
+            subject,
+
+        "text":
+            report,
+
+        "html":
+            f"""
+            <html>
+            <body
+                style="
+                font-family:Arial;
+                line-height:1.6;
+                white-space:normal;
+                "
+            >
+                {html_report}
+            </body>
+            </html>
+            """
+    }
+
+
+    response = requests.post(
+
+        RESEND_URL,
+
+        headers=headers,
+
+        json=payload,
+
+        timeout=60
+    )
+
+
+    if response.status_code >= 300:
+
+        try:
+            error = response.json()
+
+        except Exception:
+            error = response.text
+
+        raise RuntimeError(
+            f"Resend error "
+            f"{response.status_code}: "
+            f"{error}"
+        )
+
+
+    print(
+        "Resend email sent successfully."
+    )
+
+    return response.json()
+
+
+# ============================================================
+# SAVE REPORT
+# ============================================================
+
+def save_report(report):
+
+    os.makedirs(
+        "reports",
+        exist_ok=True
+    )
+
+    filename = os.path.join(
+        "reports",
+        "youtube_idea_intelligence.txt"
+    )
+
+    with open(
+        filename,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        file.write(
+            report
+        )
+
+    print(
+        f"Report saved: {filename}"
+    )
+
+    return filename
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
-    try:
-        report = generate_report()
 
-        txt_file, json_file = save_report(report)
+    print()
+    print("=" * 70)
+    print(
+        "YOUTUBE HIGH CTR IDEA GENERATOR"
+    )
+    print("=" * 70)
+    print()
 
-        print()
-        print("==============================================")
-        print("IDEA GENERATION COMPLETED")
-        print("==============================================")
-        print()
-        print(f"Report: {txt_file}")
-        print(f"Metadata: {json_file}")
-        print()
+    check_environment()
 
-        print(report)
 
-    except Exception as e:
-        print()
-        print("==============================================")
-        print("ERROR")
-        print("==============================================")
-        print()
-        print(str(e))
-        raise
+    # --------------------------------------------------------
+    # COLLECT DATA
+    # --------------------------------------------------------
 
+    india_videos = (
+        collect_india_trends()
+    )
+
+    world_videos = (
+        collect_world_trends()
+    )
+
+
+    # --------------------------------------------------------
+    # ANALYZE
+    # --------------------------------------------------------
+
+    print()
+    print(
+        "Analyzing YouTube trend patterns..."
+    )
+
+    india_data = analyze_trends(
+        india_videos,
+        "India"
+    )
+
+    world_data = analyze_trends(
+        world_videos,
+        "World"
+    )
+
+
+    # --------------------------------------------------------
+    # AI
+    # --------------------------------------------------------
+
+    print()
+    print(
+        "Generating high CTR ideas..."
+    )
+
+    report_json = generate_ideas(
+        india_data,
+        world_data
+    )
+
+
+    # --------------------------------------------------------
+    # BUILD REPORT
+    # --------------------------------------------------------
+
+    report = build_report(
+        report_json,
+        india_data,
+        world_data
+    )
+
+
+    # --------------------------------------------------------
+    # SAVE
+    # --------------------------------------------------------
+
+    save_report(
+        report
+    )
+
+
+    # --------------------------------------------------------
+    # EMAIL
+    # --------------------------------------------------------
+
+    winner = report_json.get(
+        "high_ctr_winner",
+        {}
+    )
+
+    winner_title = clean_text(
+        winner.get(
+            "title",
+            "High CTR YouTube Ideas"
+        )
+    )
+
+    subject = (
+        "YouTube High CTR Idea "
+        + winner_title
+    )
+
+    print()
+    print(
+        "Sending report through Resend..."
+    )
+
+    send_resend_email(
+        subject,
+        report
+    )
+
+
+    # --------------------------------------------------------
+    # SUCCESS
+    # --------------------------------------------------------
+
+    print()
+    print("=" * 70)
+    print(
+        "IDEA GENERATOR COMPLETED SUCCESSFULLY"
+    )
+    print("=" * 70)
+
+    print()
+    print(
+        "HIGH CTR WINNER:"
+    )
+
+    print(
+        clean_text(
+            winner.get(
+                "title"
+            )
+        )
+    )
+
+    print()
+
+    print(
+        "ROMAN TELUGU LOGLINE:"
+    )
+
+    print(
+        clean_text(
+            winner.get(
+                "roman_telugu_logline"
+            )
+        )
+    )
+
+    print()
+
+
+# ============================================================
+# RUN
+# ============================================================
 
 if __name__ == "__main__":
     main()

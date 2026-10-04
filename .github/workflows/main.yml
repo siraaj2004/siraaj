@@ -1,157 +1,93 @@
 name: YouTube Trend Intelligence
 
 on:
-  workflow_dispatch:
-
-  schedule:
-    # 08:30 IST
-    - cron: "0 3 * * *"
-
-    # 12:00 IST
-    - cron: "30 6 * * *"
-
-    # 16:00 IST
-    - cron: "30 10 * * *"
-
-    # 21:30 IST
-    - cron: "0 16 * * *"
+workflow_dispatch:
+schedule:
+- cron: 0 * * * *
 
 jobs:
-  youtube-trend-intelligence:
+youtube-trend-intelligence:
+runs-on: ubuntu-latest
 
-    runs-on: ubuntu-latest
+```
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
 
-    steps:
+  - name: Setup Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: 3.12
+      cache: pip
 
-      # ======================================================
-      # CHECKOUT REPOSITORY
-      # ======================================================
+  - name: Install dependencies
+    run: |
+      python -m pip install --upgrade pip
+      pip install -r requirements.txt
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
+  - name: Check required secrets
+    env:
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GMAIL_USER: ${{ secrets.GMAIL_USER }}
+      GMAIL_TO: ${{ secrets.GMAIL_TO }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+    run: |
+      set -e
 
+      echo Checking required secrets...
 
-      # ======================================================
-      # SETUP PYTHON
-      # ======================================================
+      if [ -z "$YOUTUBE_API_KEY" ]; then
+        echo ERROR: YOUTUBE_API_KEY is missing
+        exit 1
+      fi
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: "pip"
+      if [ -z "$GEMINI_API_KEY" ]; then
+        echo ERROR: GEMINI_API_KEY is missing
+        exit 1
+      fi
 
+      if [ -z "$GMAIL_USER" ]; then
+        echo ERROR: GMAIL_USER is missing
+        exit 1
+      fi
 
-      # ======================================================
-      # INSTALL DEPENDENCIES
-      # ======================================================
+      if [ -z "$GMAIL_TO" ]; then
+        echo ERROR: GMAIL_TO is missing
+        exit 1
+      fi
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      if [ -z "$GMAIL_APP_PASSWORD" ]; then
+        echo ERROR: GMAIL_APP_PASSWORD is missing
+        exit 1
+      fi
 
+      echo All required secrets are available.
 
-      # ======================================================
-      # CHECK PYTHON
-      # ======================================================
+  - name: Run YouTube Trend Intelligence
+    env:
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GMAIL_USER: ${{ secrets.GMAIL_USER }}
+      GMAIL_TO: ${{ secrets.GMAIL_TO }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+    run: |
+      set -e
 
-      - name: Check Python environment
-        run: |
-          python --version
-          pip --version
+      echo ==============================================
+      echo STARTING YOUTUBE TREND INTELLIGENCE
+      echo ==============================================
 
+      python src/app.py
 
-      # ======================================================
-      # CHECK REQUIRED SECRETS
-      # ======================================================
-
-      - name: Check environment variables
-        env:
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_TO: ${{ secrets.GMAIL_TO }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-
-        run: |
-          set -e
-
-          echo "Checking required secrets..."
-
-          if [ -z "$YOUTUBE_API_KEY" ]; then
-            echo "ERROR: YOUTUBE_API_KEY is missing"
-            exit 1
-          else
-            echo "OK: YOUTUBE_API_KEY found"
-          fi
-
-          if [ -z "$GEMINI_API_KEY" ]; then
-            echo "ERROR: GEMINI_API_KEY is missing"
-            exit 1
-          else
-            echo "OK: GEMINI_API_KEY found"
-          fi
-
-          if [ -z "$GMAIL_USER" ]; then
-            echo "ERROR: GMAIL_USER is missing"
-            exit 1
-          else
-            echo "OK: GMAIL_USER found"
-          fi
-
-          if [ -z "$GMAIL_TO" ]; then
-            echo "ERROR: GMAIL_TO is missing"
-            exit 1
-          else
-            echo "OK: GMAIL_TO found"
-          fi
-
-          if [ -z "$GMAIL_APP_PASSWORD" ]; then
-            echo "ERROR: GMAIL_APP_PASSWORD is missing"
-            exit 1
-          else
-            echo "OK: GMAIL_APP_PASSWORD found"
-          fi
-
-          echo "All required secrets are available."
-
-
-      # ======================================================
-      # RUN YOUTUBE TREND INTELLIGENCE
-      # ======================================================
-
-      - name: Run YouTube Trend Intelligence
-        env:
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_TO: ${{ secrets.GMAIL_TO }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-
-        run: |
-          set -e
-
-          echo ""
-          echo "=============================================="
-          echo "STARTING YOUTUBE TREND INTELLIGENCE"
-          echo "=============================================="
-
-          python src/app.py
-
-
-      # ======================================================
-      # UPLOAD GENERATED REPORTS
-      # ======================================================
-
-      - name: Upload generated reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: youtube-trend-reports
-          path: |
-            reports/
-            summaries/
-            data/
-          if-no-files-found: ignore
+  - name: Upload generated files
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: youtube-trend-reports
+      path: |
+        reports/
+        summaries/
+        data/
+      if-no-files-found: ignore
 ```

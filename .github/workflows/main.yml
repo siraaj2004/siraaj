@@ -1,12 +1,10 @@
 name: YouTube High CTR Idea Generator
 
 on:
-  # Run every hour at minute 30
-  # Example: 8:30, 9:30, 10:30, 11:30...
-  schedule:
-    - cron: "30 * * * *"
+  # Run at the beginning of every hour
+  - cron: "0 * * * *"
 
-  # Allow manual run from GitHub Actions
+  # Allow manual execution
   workflow_dispatch:
 
 jobs:
@@ -32,7 +30,28 @@ jobs:
           python-version: "3.12"
 
       # ============================================================
-      # INSTALL
+      # SHOW FILES
+      # ============================================================
+
+      - name: Show project files
+        shell: bash
+        run: |
+          set -e
+
+          echo "=============================================="
+          echo "PROJECT DIRECTORY"
+          echo "=============================================="
+
+          pwd
+
+          echo ""
+          echo "Python files:"
+          find . -type f -name "*.py" \
+            -not -path "./.git/*" \
+            -print | sort
+
+      # ============================================================
+      # INSTALL DEPENDENCIES
       # ============================================================
 
       - name: Install dependencies
@@ -52,10 +71,47 @@ jobs:
           python -m pip install requests python-dotenv
 
       # ============================================================
+      # FIND MAIN.PY
+      # ============================================================
+
+      - name: Locate main.py
+        id: locate_main
+        shell: bash
+        run: |
+          set -e
+
+          echo "=============================================="
+          echo "SEARCHING FOR main.py"
+          echo "=============================================="
+
+          MAIN_FILE=$(find . \
+            -type f \
+            -name "main.py" \
+            -not -path "./.git/*" \
+            -print | head -n 1)
+
+          if [ -z "$MAIN_FILE" ]; then
+            echo "ERROR: main.py was not found."
+
+            echo ""
+            echo "Available Python files:"
+            find . -type f -name "*.py" \
+              -not -path "./.git/*" \
+              -print | sort
+
+            exit 1
+          fi
+
+          echo "Found:"
+          echo "$MAIN_FILE"
+
+          echo "main_file=$MAIN_FILE" >> "$GITHUB_OUTPUT"
+
+      # ============================================================
       # CHECK SECRETS
       # ============================================================
 
-      - name: Check required secrets
+      - name: Check secrets
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -95,19 +151,18 @@ jobs:
             exit 1
           }
 
-          echo "All required secrets are available."
+          echo "All secrets are configured."
 
       # ============================================================
-      # GENERATE IDEAS
+      # RUN YOUTUBE GENERATOR
       # ============================================================
 
       - name: Generate YouTube High CTR Ideas
+        id: generate
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-
           OPENROUTER_MODEL: openrouter/free
-
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
         shell: bash
@@ -118,20 +173,66 @@ jobs:
           echo "STARTING YOUTUBE HIGH CTR IDEA GENERATOR"
           echo "======================================================================"
 
-          python main.py
+          MAIN_FILE="${{ steps.locate_main.outputs.main_file }}"
+
+          echo "Running:"
+          echo "$MAIN_FILE"
+
+          python "$MAIN_FILE"
 
           echo ""
           echo "======================================================================"
-          echo "CHECKING RESULT"
+          echo "SEARCHING FOR GENERATED RESULT"
           echo "======================================================================"
 
-          if [ ! -f "data/youtube_high_ctr_ideas.json" ]; then
-            echo "ERROR: Result file was not created."
+          RESULT_FILE=$(find . \
+            -type f \
+            -name "youtube_high_ctr_ideas.json" \
+            -not -path "./.git/*" \
+            -print | head -n 1)
+
+          if [ -z "$RESULT_FILE" ]; then
+            echo "ERROR: youtube_high_ctr_ideas.json was not created."
             exit 1
           fi
 
-          echo "SUCCESS:"
-          ls -lh data/youtube_high_ctr_ideas.json
+          echo "Result:"
+          echo "$RESULT_FILE"
+
+          echo "result_file=$RESULT_FILE" >> "$GITHUB_OUTPUT"
+
+      # ============================================================
+      # FIND GMAIL SENDER
+      # ============================================================
+
+      - name: Locate gmail_sender.py
+        id: locate_gmail
+        shell: bash
+        run: |
+          set -e
+
+          GMAIL_FILE=$(find . \
+            -type f \
+            -name "gmail_sender.py" \
+            -not -path "./.git/*" \
+            -print | head -n 1)
+
+          if [ -z "$GMAIL_FILE" ]; then
+            echo "ERROR: gmail_sender.py was not found."
+
+            echo ""
+            echo "Available Python files:"
+            find . -type f -name "*.py" \
+              -not -path "./.git/*" \
+              -print | sort
+
+            exit 1
+          fi
+
+          echo "Gmail sender:"
+          echo "$GMAIL_FILE"
+
+          echo "gmail_file=$GMAIL_FILE" >> "$GITHUB_OUTPUT"
 
       # ============================================================
       # SEND EMAIL
@@ -145,7 +246,7 @@ jobs:
 
           EMAIL_SUBJECT: "🔥 YouTube High CTR Ideas - Hourly"
 
-          YOUTUBE_RESULT_FILE: "data/youtube_high_ctr_ideas.json"
+          YOUTUBE_RESULT_FILE: ${{ steps.generate.outputs.result_file }}
 
         shell: bash
         run: |
@@ -155,7 +256,9 @@ jobs:
           echo "SENDING EMAIL"
           echo "======================================================================"
 
-          python gmail_sender.py
+          GMAIL_FILE="${{ steps.locate_gmail.outputs.gmail_file }}"
+
+          python "$GMAIL_FILE"
 
           echo ""
           echo "======================================================================"
@@ -166,11 +269,12 @@ jobs:
       # UPLOAD RESULT
       # ============================================================
 
-      - name: Upload generated JSON
+      - name: Upload generated result
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: youtube-high-ctr-results-${{ github.run_number }}
-          path: data/youtube_high_ctr_ideas.json
+          path: |
+            **/youtube_high_ctr_ideas.json
           if-no-files-found: error
           retention-days: 7

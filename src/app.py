@@ -1,4 +1,3 @@
-````python
 import os
 import sys
 import json
@@ -10,14 +9,9 @@ from datetime import datetime
 import requests
 from dotenv import load_dotenv
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.enums import TA_CENTER
 
-
-# ============================================================
-# PATHS
-# ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -28,11 +22,8 @@ JSON_FILE = DATA_DIR / "youtube_high_ctr_ideas.json"
 PDF_FILE = DATA_DIR / "youtube_high_ctr_ideas.pdf"
 
 
-# ============================================================
-# LOAD ENVIRONMENT
-# ============================================================
-
 load_dotenv(BASE_DIR / ".env")
+
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
@@ -46,26 +37,18 @@ OPENROUTER_MODEL = os.getenv(
 ).strip()
 
 
-# ============================================================
-# LOGGING
-# ============================================================
-
 def log(message=""):
     print(message, flush=True)
 
 
-# ============================================================
-# ENVIRONMENT CHECK
-# ============================================================
-
-def validate_environment():
+def check_environment():
 
     log("")
     log("=" * 60)
-    log("ENVIRONMENT CHECK")
+    log("CHECKING ENVIRONMENT")
     log("=" * 60)
 
-    required = {
+    variables = {
         "OPENROUTER_API_KEY": OPENROUTER_API_KEY,
         "RESEND_API_KEY": RESEND_API_KEY,
         "FROM_EMAIL": FROM_EMAIL,
@@ -75,7 +58,7 @@ def validate_environment():
 
     missing = []
 
-    for name, value in required.items():
+    for name, value in variables.items():
 
         if value:
             log(f"{name}: OK")
@@ -85,37 +68,28 @@ def validate_environment():
 
     if missing:
 
-        log("")
-        log("ERROR: Missing GitHub Secrets:")
-
-        for item in missing:
-            log(f"  - {item}")
-
         raise RuntimeError(
-            "Missing environment variables: "
+            "Missing GitHub Secrets: "
             + ", ".join(missing)
         )
 
-    log("")
     log("Environment check: OK")
 
 
-# ============================================================
-# YOUTUBE TREND COLLECTION
-# ============================================================
-
-def collect_youtube_trends(region_code, max_results=50):
+def youtube_trends(region):
 
     log("")
-    log(f"Collecting YouTube mostPopular data: {region_code}")
+    log(
+        f"Collecting YouTube mostPopular data: {region}"
+    )
 
     url = "https://www.googleapis.com/youtube/v3/videos"
 
     params = {
-        "part": "snippet,statistics,contentDetails",
+        "part": "snippet,statistics",
         "chart": "mostPopular",
-        "regionCode": region_code,
-        "maxResults": max_results,
+        "regionCode": region,
+        "maxResults": 50,
         "key": YOUTUBE_API_KEY,
     }
 
@@ -125,10 +99,13 @@ def collect_youtube_trends(region_code, max_results=50):
         timeout=60,
     )
 
-    log(f"YouTube HTTP status: {response.status_code}")
+    log(
+        f"YouTube HTTP status: {response.status_code}"
+    )
 
     if response.status_code >= 400:
-        log(response.text[:2000])
+
+        log(response.text[:3000])
         response.raise_for_status()
 
     data = response.json()
@@ -138,78 +115,60 @@ def collect_youtube_trends(region_code, max_results=50):
     for item in data.get("items", []):
 
         snippet = item.get("snippet", {})
-        statistics = item.get("statistics", {})
+        stats = item.get("statistics", {})
 
-        video = {
-            "video_id": item.get("id", ""),
+        videos.append({
             "title": snippet.get("title", ""),
-            "description": snippet.get("description", ""),
-            "channel_title": snippet.get("channelTitle", ""),
-            "published_at": snippet.get("publishedAt", ""),
-            "category_id": snippet.get("categoryId", ""),
-            "view_count": int(
-                statistics.get("viewCount", 0) or 0
+            "channel": snippet.get(
+                "channelTitle",
+                ""
             ),
-            "like_count": int(
-                statistics.get("likeCount", 0) or 0
+            "published_at": snippet.get(
+                "publishedAt",
+                ""
             ),
-            "comment_count": int(
-                statistics.get("commentCount", 0) or 0
+            "views": int(
+                stats.get(
+                    "viewCount",
+                    0
+                ) or 0
             ),
-            "region": region_code,
-        }
+            "likes": int(
+                stats.get(
+                    "likeCount",
+                    0
+                ) or 0
+            ),
+            "comments": int(
+                stats.get(
+                    "commentCount",
+                    0
+                ) or 0
+            ),
+            "region": region,
+        })
 
-        if video["title"]:
-            videos.append(video)
-
-    log(f"Collected {len(videos)} videos.")
+    log(
+        f"Collected {len(videos)} videos."
+    )
 
     return videos
 
 
-# ============================================================
-# CLEAN TRENDS
-# ============================================================
+def openrouter(prompt, temperature=0.7):
 
-def prepare_trends(india_videos, worldwide_videos):
-
-    def clean(videos):
-
-        result = []
-
-        for video in videos:
-
-            result.append({
-                "title": video.get("title", ""),
-                "channel": video.get("channel_title", ""),
-                "views": video.get("view_count", 0),
-                "likes": video.get("like_count", 0),
-                "comments": video.get("comment_count", 0),
-                "published_at": video.get("published_at", ""),
-                "region": video.get("region", ""),
-            })
-
-        return result
-
-    return {
-        "india": clean(india_videos),
-        "worldwide": clean(worldwide_videos),
-    }
-
-
-# ============================================================
-# OPENROUTER REQUEST
-# ============================================================
-
-def call_openrouter(prompt, temperature=0.7):
-
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url = (
+        "https://openrouter.ai/api/v1/"
+        "chat/completions"
+    )
 
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": (
+            f"Bearer {OPENROUTER_API_KEY}"
+        ),
         "Content-Type": "application/json",
         "HTTP-Referer": "https://github.com/",
-        "X-Title": "YouTube High CTR Idea Generator",
+        "X-Title": "YouTube High CTR Generator",
     }
 
     payload = {
@@ -218,11 +177,10 @@ def call_openrouter(prompt, temperature=0.7):
             {
                 "role": "system",
                 "content": (
-                    "You are an expert YouTube entertainment "
+                    "You are a YouTube entertainment "
                     "content strategist. "
-                    "Return valid JSON only. "
-                    "Never use Markdown code fences. "
-                    "Never write explanations outside JSON."
+                    "Return JSON only. "
+                    "Never use Markdown fences."
                 ),
             },
             {
@@ -238,8 +196,12 @@ def call_openrouter(prompt, temperature=0.7):
 
         log("")
         log("OPENROUTER REQUEST")
-        log(f"Trying OpenRouter model: {OPENROUTER_MODEL}")
-        log(f"Attempt: {attempt}")
+        log(
+            f"Model: {OPENROUTER_MODEL}"
+        )
+        log(
+            f"Attempt: {attempt}"
+        )
 
         try:
 
@@ -250,11 +212,12 @@ def call_openrouter(prompt, temperature=0.7):
                 timeout=180,
             )
 
-            log(f"HTTP status: {response.status_code}")
+            log(
+                f"HTTP status: {response.status_code}"
+            )
 
             if response.status_code >= 400:
 
-                log("OpenRouter error:")
                 log(response.text[:3000])
 
                 if attempt == 3:
@@ -264,32 +227,42 @@ def call_openrouter(prompt, temperature=0.7):
 
             data = response.json()
 
-            choices = data.get("choices", [])
+            choices = data.get(
+                "choices",
+                []
+            )
 
             if not choices:
-                log("No choices returned by OpenRouter.")
                 continue
 
-            message = choices[0].get("message", {})
-
-            content = message.get("content", "")
+            content = (
+                choices[0]
+                .get("message", {})
+                .get("content", "")
+            )
 
             if not content:
-                log("OpenRouter returned empty content.")
                 continue
 
             log("OpenRouter SUCCESS")
 
             log(
-                f"Model used: "
-                f"{data.get('model', OPENROUTER_MODEL)}"
+                "Model used: "
+                + str(
+                    data.get(
+                        "model",
+                        OPENROUTER_MODEL
+                    )
+                )
             )
 
             return content
 
         except Exception as error:
 
-            log(f"OpenRouter attempt failed: {error}")
+            log(
+                f"OpenRouter error: {error}"
+            )
 
             if attempt == 3:
                 raise
@@ -299,55 +272,52 @@ def call_openrouter(prompt, temperature=0.7):
     )
 
 
-# ============================================================
-# EXTRACT JSON
-# ============================================================
-
-def extract_json(text):
+def parse_json(text):
 
     if not text:
         raise ValueError(
-            "AI returned an empty response."
+            "AI returned empty response."
         )
 
     text = text.strip()
 
-    # Remove accidental Markdown fences
-    text = text.replace("```json", "")
-    text = text.replace("```JSON", "")
-    text = text.replace("```python", "")
-    text = text.replace("```", "")
+    text = text.replace(
+        "```json",
+        ""
+    )
+
+    text = text.replace(
+        "```JSON",
+        ""
+    )
+
+    text = text.replace(
+        "```",
+        ""
+    )
+
     text = text.strip()
 
-    # Try complete response
     try:
         return json.loads(text)
+
     except Exception:
         pass
 
-    # Find object
-    start = text.find("{")
-    end = text.rfind("}")
+    first = text.find("{")
+    last = text.rfind("}")
 
-    if start != -1 and end > start:
+    if first != -1 and last > first:
 
-        candidate = text[start:end + 1]
-
-        try:
-            return json.loads(candidate)
-        except Exception:
-            pass
-
-    # Find array
-    start = text.find("[")
-    end = text.rfind("]")
-
-    if start != -1 and end > start:
-
-        candidate = text[start:end + 1]
+        candidate = text[
+            first:last + 1
+        ]
 
         try:
-            return json.loads(candidate)
+            return json.loads(
+                candidate
+            )
+
         except Exception:
             pass
 
@@ -356,122 +326,58 @@ def extract_json(text):
     )
 
 
-# ============================================================
-# NORMALIZE RESULT
-# ============================================================
-
-def normalize_result(result):
-
-    if not isinstance(result, dict):
-        result = {}
-
-    ideas = result.get("ideas", [])
-
-    if not isinstance(ideas, list):
-        ideas = []
-
-    shorts = result.get("shorts_ideas", [])
-
-    if not isinstance(shorts, list):
-        shorts = []
-
-    market_summary = result.get(
-        "market_summary",
-        {}
-    )
-
-    if not isinstance(market_summary, dict):
-        market_summary = {}
-
-    final_best = result.get(
-        "final_best_idea",
-        {}
-    )
-
-    if not isinstance(final_best, dict):
-        final_best = {}
-
-    return {
-        "generated_at": datetime.now().isoformat(),
-        "market_summary": {
-            "india": market_summary.get(
-                "india",
-                []
-            ),
-            "worldwide": market_summary.get(
-                "worldwide",
-                []
-            ),
-        },
-        "ideas": ideas,
-        "shorts_ideas": shorts,
-        "final_best_idea": final_best,
-    }
-
-
-# ============================================================
-# GENERATE IDEAS
-# ============================================================
-
-def generate_ideas(trends):
+def generate_report(india, worldwide):
 
     log("")
-    log("3. Generating monetization strategy...")
-    log("")
-    log("4. Generating HIGH CTR + YouTube ideas...")
+    log(
+        "Generating HIGH CTR + YouTube ideas..."
+    )
 
     prompt = f"""
-Create a high-engagement YouTube entertainment report.
+Create a YouTube entertainment trend report.
 
-TARGET:
-- Indian audience
-- Telugu audience
-- Worldwide entertainment trends
-- YouTube Shorts
-- 8-10 minute YouTube videos
+Audience:
+Indian viewers and Telugu viewers.
 
-STYLE:
-- Interesting
-- High curiosity
-- Strong hooks
+Create:
+1. High CTR YouTube ideas.
+2. YouTube Shorts ideas.
+3. One final best idea.
+
+Preferred genres:
 - Thriller
 - Mystery
 - Suspense
 - Comedy
 - Relatable situations
-- Logical unexpected endings
+- Unexpected but logical twists
 
-DO NOT create:
-- boring ideas
-- random nonsense
-- childish ideas
-- impossible concepts
-- generic ideas
+Do not create boring, childish, random,
+or meaningless ideas.
 
 INDIA TRENDS:
 
 {json.dumps(
-    trends["india"][:50],
+    india[:50],
     ensure_ascii=False
 )}
 
 WORLDWIDE TRENDS:
 
 {json.dumps(
-    trends["worldwide"][:50],
+    worldwide[:50],
     ensure_ascii=False
 )}
 
-Return ONLY valid JSON.
+Return ONLY JSON.
 
-Use exactly this structure:
+Use this structure:
 
 {{
   "market_summary": {{
     "india": [],
     "worldwide": []
   }},
-
   "ideas": [
     {{
       "title": "",
@@ -484,7 +390,6 @@ Use exactly this structure:
       "ending": ""
     }}
   ],
-
   "shorts_ideas": [
     {{
       "title": "",
@@ -493,7 +398,6 @@ Use exactly this structure:
       "twist": ""
     }}
   ],
-
   "final_best_idea": {{
     "title": "",
     "genre": "",
@@ -505,102 +409,113 @@ Use exactly this structure:
   }}
 }}
 
-Generate at least 10 strong long-form ideas
-and at least 10 Shorts ideas.
+Generate at least 10 long-form ideas
+and 10 Shorts ideas.
 """
 
-    raw = call_openrouter(prompt)
+    raw = openrouter(
+        prompt
+    )
 
     try:
 
-        result = extract_json(raw)
-
-        log("")
-        log("JSON parsed successfully.")
+        result = parse_json(
+            raw
+        )
 
     except Exception as error:
 
         log("")
-        log("Initial JSON parsing failed:")
+        log(
+            "Initial JSON parsing failed."
+        )
         log(str(error))
 
         log("")
-        log("ATTEMPTING JSON REPAIR")
+        log(
+            "ATTEMPTING JSON REPAIR"
+        )
 
         repair_prompt = f"""
-Convert the following AI response into valid JSON.
+Repair this response into valid JSON.
 
 Return ONLY JSON.
-Do not use Markdown.
-Do not use code fences.
+No Markdown.
+No code fences.
 
 Required keys:
-
 market_summary
 ideas
 shorts_ideas
 final_best_idea
 
-AI RESPONSE:
+Response:
 
 {raw}
 """
 
-        repaired = call_openrouter(
+        repaired = openrouter(
             repair_prompt,
-            temperature=0.2,
+            temperature=0.2
         )
 
-        result = extract_json(repaired)
+        result = parse_json(
+            repaired
+        )
 
-    return normalize_result(result)
+    if not isinstance(
+        result,
+        dict
+    ):
+        result = {}
 
+    return result
 
-# ============================================================
-# SAVE JSON
-# ============================================================
 
 def save_json(report):
+
+    output = {
+        "generated_at": datetime.now().isoformat(),
+        **report
+    }
 
     with open(
         JSON_FILE,
         "w",
-        encoding="utf-8",
+        encoding="utf-8"
     ) as file:
 
         json.dump(
-            report,
+            output,
             file,
             indent=2,
-            ensure_ascii=False,
+            ensure_ascii=False
         )
 
     log("")
     log("RESULT SAVED")
     log(str(JSON_FILE))
 
+    return output
 
-# ============================================================
-# PDF
-# ============================================================
 
-def safe_text(value):
+def clean_text(value):
 
     if value is None:
         return ""
 
-    if isinstance(value, (dict, list)):
+    if isinstance(
+        value,
+        (dict, list)
+    ):
 
         value = json.dumps(
             value,
-            ensure_ascii=False,
-            indent=2,
+            ensure_ascii=False
         )
 
-    value = str(value)
-
     return html.escape(
-        value
+        str(value)
     ).replace(
         "\n",
         "<br/>"
@@ -616,12 +531,6 @@ def create_pdf(report):
 
     styles = getSampleStyleSheet()
 
-    title_style = styles["Title"]
-    title_style.alignment = TA_CENTER
-
-    heading_style = styles["Heading2"]
-    body_style = styles["BodyText"]
-
     document = SimpleDocTemplate(
         str(PDF_FILE),
         pagesize=A4,
@@ -636,34 +545,13 @@ def create_pdf(report):
     story.append(
         Paragraph(
             "YOUTUBE HIGH CTR IDEA REPORT",
-            title_style,
+            styles["Title"]
         )
     )
 
     story.append(
         Spacer(1, 20)
     )
-
-    story.append(
-        Paragraph(
-            "Generated: "
-            + safe_text(
-                report.get(
-                    "generated_at",
-                    ""
-                )
-            ),
-            body_style,
-        )
-    )
-
-    story.append(
-        Spacer(1, 20)
-    )
-
-    # --------------------------------------------------------
-    # FINAL BEST IDEA
-    # --------------------------------------------------------
 
     best = report.get(
         "final_best_idea",
@@ -673,11 +561,11 @@ def create_pdf(report):
     story.append(
         Paragraph(
             "FINAL BEST IDEA",
-            heading_style,
+            styles["Heading2"]
         )
     )
 
-    for key in [
+    fields = [
         "title",
         "genre",
         "english",
@@ -685,17 +573,22 @@ def create_pdf(report):
         "hook",
         "why_best",
         "ending",
-    ]:
+    ]
 
-        value = best.get(key, "")
+    for field in fields:
+
+        value = best.get(
+            field,
+            ""
+        )
 
         if value:
 
             story.append(
                 Paragraph(
-                    f"<b>{key.upper()}</b><br/>"
-                    f"{safe_text(value)}",
-                    body_style,
+                    f"<b>{field.upper()}</b><br/>"
+                    f"{clean_text(value)}",
+                    styles["BodyText"]
                 )
             )
 
@@ -703,137 +596,132 @@ def create_pdf(report):
                 Spacer(1, 10)
             )
 
-    story.append(PageBreak())
-
-    # --------------------------------------------------------
-    # LONG FORM IDEAS
-    # --------------------------------------------------------
-
-    story.append(
-        Paragraph(
-            "HIGH CTR VIDEO IDEAS",
-            heading_style,
-        )
-    )
-
     ideas = report.get(
         "ideas",
         []
     )
 
-    for index, idea in enumerate(
-        ideas,
-        start=1
-    ):
+    if ideas:
 
         story.append(
             Paragraph(
-                f"<b>{index}. "
-                f"{safe_text(idea.get('title', ''))}"
-                f"</b>",
-                heading_style,
+                "HIGH CTR VIDEO IDEAS",
+                styles["Heading2"]
             )
         )
 
-        for key in [
-            "genre",
-            "english",
-            "roman_telugu",
-            "hook",
-            "why_best",
-            "format",
-            "ending",
-        ]:
+        for number, idea in enumerate(
+            ideas,
+            start=1
+        ):
 
-            value = idea.get(
-                key,
-                ""
+            story.append(
+                Paragraph(
+                    f"<b>{number}. "
+                    f"{clean_text(idea.get('title', ''))}"
+                    f"</b>",
+                    styles["Heading3"]
+                )
             )
 
-            if value:
+            for field in [
+                "genre",
+                "english",
+                "roman_telugu",
+                "hook",
+                "why_best",
+                "format",
+                "ending",
+            ]:
 
-                story.append(
-                    Paragraph(
-                        f"<b>{key.upper()}</b><br/>"
-                        f"{safe_text(value)}",
-                        body_style,
+                value = idea.get(
+                    field,
+                    ""
+                )
+
+                if value:
+
+                    story.append(
+                        Paragraph(
+                            f"<b>{field.upper()}</b><br/>"
+                            f"{clean_text(value)}",
+                            styles["BodyText"]
+                        )
                     )
-                )
 
-                story.append(
-                    Spacer(1, 8)
-                )
-
-        story.append(
-            Spacer(1, 15)
-        )
-
-    # --------------------------------------------------------
-    # SHORTS
-    # --------------------------------------------------------
-
-    story.append(PageBreak())
-
-    story.append(
-        Paragraph(
-            "CURRENT SHORTS",
-            heading_style,
-        )
-    )
+                    story.append(
+                        Spacer(1, 7)
+                    )
 
     shorts = report.get(
         "shorts_ideas",
         []
     )
 
-    for index, idea in enumerate(
-        shorts,
-        start=1
-    ):
+    if shorts:
+
+        story.append(
+            PageBreak()
+        )
 
         story.append(
             Paragraph(
-                f"<b>{index}. "
-                f"{safe_text(idea.get('title', ''))}"
-                f"</b>",
-                heading_style,
+                "CURRENT SHORTS",
+                styles["Heading2"]
             )
         )
 
-        for key in [
-            "hook",
-            "concept",
-            "twist",
-        ]:
+        for number, idea in enumerate(
+            shorts,
+            start=1
+        ):
 
-            value = idea.get(
-                key,
-                ""
+            story.append(
+                Paragraph(
+                    f"<b>{number}. "
+                    f"{clean_text(idea.get('title', ''))}"
+                    f"</b>",
+                    styles["Heading3"]
+                )
             )
 
-            if value:
+            for field in [
+                "hook",
+                "concept",
+                "twist",
+            ]:
 
-                story.append(
-                    Paragraph(
-                        f"<b>{key.upper()}</b><br/>"
-                        f"{safe_text(value)}",
-                        body_style,
+                value = idea.get(
+                    field,
+                    ""
+                )
+
+                if value:
+
+                    story.append(
+                        Paragraph(
+                            f"<b>{field.upper()}</b><br/>"
+                            f"{clean_text(value)}",
+                            styles["BodyText"]
+                        )
                     )
-                )
 
-                story.append(
-                    Spacer(1, 8)
-                )
+                    story.append(
+                        Spacer(1, 7)
+                    )
 
-    document.build(story)
+    document.build(
+        story
+    )
 
-    log("PDF created successfully")
-    log(f"PDF FILE: {PDF_FILE}")
+    log(
+        "PDF created successfully"
+    )
 
+    log(
+        f"PDF: {PDF_FILE}"
+    )
 
-# ============================================================
-# SEND EMAIL WITH RESEND
-# ============================================================
 
 def send_email():
 
@@ -842,25 +730,10 @@ def send_email():
     log("SENDING EMAIL THROUGH RESEND")
     log("=" * 60)
 
-    if not RESEND_API_KEY:
-        raise RuntimeError(
-            "RESEND_API_KEY is missing."
-        )
-
-    if not FROM_EMAIL:
-        raise RuntimeError(
-            "FROM_EMAIL is missing."
-        )
-
-    if not RECIPIENT_EMAIL:
-        raise RuntimeError(
-            "RECIPIENT_EMAIL is missing."
-        )
-
     if not PDF_FILE.exists():
 
         raise FileNotFoundError(
-            f"PDF not found: {PDF_FILE}"
+            f"PDF does not exist: {PDF_FILE}"
         )
 
     with open(
@@ -868,11 +741,11 @@ def send_email():
         "rb"
     ) as file:
 
-        pdf_data = file.read()
-
-    pdf_base64 = base64.b64encode(
-        pdf_data
-    ).decode("utf-8")
+        encoded = base64.b64encode(
+            file.read()
+        ).decode(
+            "utf-8"
+        )
 
     payload = {
         "from": FROM_EMAIL,
@@ -893,45 +766,37 @@ def send_email():
         and high CTR ideas are attached.
         </p>
 
-        <p>The report contains:</p>
-
-        <ul>
-            <li>India YouTube trends</li>
-            <li>Worldwide trends</li>
-            <li>High CTR video ideas</li>
-            <li>YouTube Shorts ideas</li>
-            <li>Final best idea</li>
-        </ul>
-
         <p>
         Generated automatically by GitHub Actions.
         </p>
         """,
         "attachments": [
             {
-                "filename": "youtube_high_ctr_ideas.pdf",
-                "content": pdf_base64,
+                "filename": (
+                    "youtube_high_ctr_ideas.pdf"
+                ),
+                "content": encoded
             }
-        ],
+        ]
     }
 
     headers = {
         "Authorization": (
             f"Bearer {RESEND_API_KEY}"
         ),
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
     }
 
     response = requests.post(
         "https://api.resend.com/emails",
         headers=headers,
         json=payload,
-        timeout=60,
+        timeout=60
     )
 
     log(
-        f"Resend HTTP status: "
-        f"{response.status_code}"
+        "Resend HTTP status: "
+        + str(response.status_code)
     )
 
     if response.status_code >= 400:
@@ -941,76 +806,22 @@ def send_email():
         log(response.text)
 
         raise RuntimeError(
-            "Resend email failed: "
+            "Resend failed: "
             + response.text
         )
 
-    try:
-        resend_data = response.json()
-    except Exception:
-        resend_data = {}
+    data = response.json()
 
     log("")
     log("EMAIL SENT SUCCESSFULLY")
 
-    if resend_data.get("id"):
+    if data.get("id"):
 
         log(
-            f"Resend ID: "
-            f"{resend_data['id']}"
+            "Resend ID: "
+            + str(data["id"])
         )
 
-
-# ============================================================
-# DISPLAY BEST IDEA
-# ============================================================
-
-def display_final_idea(report):
-
-    best = report.get(
-        "final_best_idea",
-        {}
-    )
-
-    log("")
-    log("=" * 60)
-    log("HIGH CTR IDEA")
-    log("=" * 60)
-
-    log(
-        f"TITLE: "
-        f"{best.get('title', '')}"
-    )
-
-    log(
-        f"GENRE: "
-        f"{best.get('genre', '')}"
-    )
-
-    log(
-        f"ENGLISH: "
-        f"{best.get('english', '')}"
-    )
-
-    log(
-        f"ROMAN TELUGU: "
-        f"{best.get('roman_telugu', '')}"
-    )
-
-    log(
-        f"HOOK: "
-        f"{best.get('hook', '')}"
-    )
-
-    log(
-        f"WHY BEST: "
-        f"{best.get('why_best', '')}"
-    )
-
-
-# ============================================================
-# MAIN
-# ============================================================
 
 def main():
 
@@ -1019,59 +830,39 @@ def main():
     log("STARTING YOUTUBE HIGH CTR IDEA GENERATOR")
     log("=" * 60)
 
-    # 1. Environment
-    validate_environment()
+    check_environment()
 
-    # 2. India
     log("")
     log("1. Collecting India trends...")
 
-    india_videos = collect_youtube_trends(
-        "IN",
-        50
+    india = youtube_trends(
+        "IN"
     )
 
-    # 3. Worldwide proxy
     log("")
     log(
         "2. Collecting worldwide proxy trends..."
     )
 
-    worldwide_videos = collect_youtube_trends(
-        "US",
-        50
+    worldwide = youtube_trends(
+        "US"
     )
 
-    # 4. Prepare trends
-    trends = prepare_trends(
-        india_videos,
-        worldwide_videos
+    report = generate_report(
+        india,
+        worldwide
     )
 
-    # 5. Generate ideas
-    report = generate_ideas(
-        trends
-    )
-
-    # 6. Save JSON
-    save_json(
+    report = save_json(
         report
     )
 
-    # 7. Display result
-    display_final_idea(
-        report
-    )
-
-    # 8. Create PDF
     create_pdf(
         report
     )
 
-    # 9. Send email
     send_email()
 
-    # 10. Finished
     log("")
     log("=" * 60)
     log(
@@ -1079,38 +870,20 @@ def main():
     )
     log("=" * 60)
 
-    log("")
     log(
         f"JSON: {JSON_FILE}"
     )
 
     log(
-        f"PDF : {PDF_FILE}"
+        f"PDF: {PDF_FILE}"
     )
 
-    log(
-        f"MAIL: {RECIPIENT_EMAIL}"
-    )
-
-    log("")
-
-
-# ============================================================
-# START
-# ============================================================
 
 if __name__ == "__main__":
 
     try:
 
         main()
-
-    except KeyboardInterrupt:
-
-        log("")
-        log("Process interrupted.")
-
-        sys.exit(130)
 
     except Exception as error:
 
@@ -1120,11 +893,8 @@ if __name__ == "__main__":
         log("=" * 60)
 
         log(
-            f"{type(error).__name__}: "
-            f"{error}"
+            f"{type(error).__name__}: {error}"
         )
 
-        log("")
-
         sys.exit(1)
-````
+

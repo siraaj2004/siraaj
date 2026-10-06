@@ -1,85 +1,108 @@
 name: YouTube High CTR Idea Generator
 
 on:
+  schedule:
+    # Run every hour, 24 hours a day
+    - cron: "0 * * * *"
+
+  # Allows you to manually run the workflow from GitHub
   workflow_dispatch:
 
-  schedule:
-    # 8:00 AM to 11:00 PM IST
-    - cron: "30 2 * * *"
-    - cron: "30 3 * * *"
-    - cron: "30 4 * * *"
-    - cron: "30 5 * * *"
-    - cron: "30 6 * * *"
-    - cron: "30 7 * * *"
-    - cron: "30 8 * * *"
-    - cron: "30 9 * * *"
-    - cron: "30 10 * * *"
-    - cron: "30 11 * * *"
-    - cron: "30 12 * * *"
-    - cron: "30 13 * * *"
-    - cron: "30 14 * * *"
-    - cron: "30 15 * * *"
-    - cron: "30 16 * * *"
-    - cron: "30 17 * * *"
-
-    # 12:00 AM to 7:00 AM IST
-    - cron: "30 18 * * *"
-    - cron: "30 19 * * *"
-    - cron: "30 20 * * *"
-    - cron: "30 21 * * *"
-    - cron: "30 22 * * *"
-    - cron: "30 23 * * *"
-    - cron: "30 0 * * *"
-    - cron: "30 1 * * *"
-
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  generate:
+  youtube-idea-generator:
+
     runs-on: ubuntu-latest
 
     steps:
+
+      # ==========================================
+      # 1. Checkout repository
+      # ==========================================
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      # ==========================================
+      # 2. Setup Python
+      # ==========================================
+      - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
 
+      # ==========================================
+      # 3. Install dependencies
+      # ==========================================
       - name: Install dependencies
-        shell: bash
         run: |
-          set -euxo pipefail
-
           python -m pip install --upgrade pip
 
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
-          else
-            echo "requirements.txt not found"
           fi
 
-      - name: Show project files
-        shell: bash
-        run: |
-          echo "=============================================="
-          echo "PROJECT FILES"
-          echo "=============================================="
-          find . -maxdepth 3 -type f \
-            -not -path "./.git/*" \
-            | sort
-
-      - name: Run YouTube generator
-        shell: bash
+      # ==========================================
+      # 4. Check environment
+      # ==========================================
+      - name: Check environment
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+        run: |
+          echo "=============================================="
+          echo "CHECKING ENVIRONMENT"
+          echo "=============================================="
+
+          if [ -z "$YOUTUBE_API_KEY" ]; then
+            echo "YOUTUBE_API_KEY: MISSING"
+            exit 1
+          else
+            echo "YOUTUBE_API_KEY: OK"
+          fi
+
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "OPENROUTER_API_KEY: MISSING"
+            exit 1
+          else
+            echo "OPENROUTER_API_KEY: OK"
+          fi
+
+          if [ -z "$RESEND_API_KEY" ]; then
+            echo "RESEND_API_KEY: MISSING"
+            exit 1
+          else
+            echo "RESEND_API_KEY: OK"
+          fi
+
+          if [ -z "$FROM_EMAIL" ]; then
+            echo "FROM_EMAIL: MISSING"
+            exit 1
+          else
+            echo "FROM_EMAIL: OK"
+          fi
+
+          if [ -z "$RECIPIENT_EMAIL" ]; then
+            echo "RECIPIENT_EMAIL: MISSING"
+            exit 1
+          else
+            echo "RECIPIENT_EMAIL: OK"
+          fi
+
+      # ==========================================
+      # 5. Run generator
+      # ==========================================
+      - name: Run YouTube High CTR Idea Generator
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
         run: |
           set -euxo pipefail
 
@@ -91,40 +114,22 @@ jobs:
           python --version
 
           echo "Running src/app.py"
-
           python src/app.py
 
           echo "=============================================="
           echo "GENERATOR FINISHED"
           echo "=============================================="
 
-      - name: Find generated files
-        if: always()
-        shell: bash
-        run: |
-          echo "=============================================="
-          echo "GENERATED FILES"
-          echo "=============================================="
-
-          find . -type f \
-            -not -path "./.git/*" \
-            \( \
-              -name "*.json" \
-              -o -name "*.pdf" \
-              -o -name "*.csv" \
-              -o -name "*.txt" \
-            \) \
-            -print
-
+      # ==========================================
+      # 6. Upload generated files
+      # ==========================================
       - name: Upload generated files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-high-ctr-${{ github.run_number }}
+          name: youtube-ideas-${{ github.run_number }}
           path: |
-            **/*.json
-            **/*.pdf
-            **/*.csv
-            **/*.txt
-          if-no-files-found: warn
+            output/
+            summaries/
+          if-no-files-found: ignore
           retention-days: 7

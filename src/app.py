@@ -49,8 +49,8 @@ RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL", "").strip()
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Keep your working free router.
-OPENROUTER_MODEL = "openrouter/free"
+# Safer default than "openrouter/free", which can return empty/malformed content
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/auto").strip()
 
 YOUTUBE_URL = "https://www.googleapis.com/youtube/v3/videos"
 
@@ -137,7 +137,6 @@ def collect_youtube_most_popular(country_code, max_results=50):
     videos = []
 
     for item in data.get("items", []):
-
         snippet = item.get("snippet", {})
         stats = item.get("statistics", {})
 
@@ -150,15 +149,9 @@ def collect_youtube_most_popular(country_code, max_results=50):
             "channel": snippet.get("channelTitle", ""),
             "published_at": snippet.get("publishedAt", ""),
             "category_id": snippet.get("categoryId", ""),
-            "view_count": int(
-                stats.get("viewCount", 0)
-            ),
-            "like_count": int(
-                stats.get("likeCount", 0)
-            ),
-            "comment_count": int(
-                stats.get("commentCount", 0)
-            ),
+            "view_count": int(stats.get("viewCount", 0)),
+            "like_count": int(stats.get("likeCount", 0)),
+            "comment_count": int(stats.get("commentCount", 0)),
             "country": country_code,
             "url": (
                 f"https://www.youtube.com/watch?v={video_id}"
@@ -185,7 +178,6 @@ def build_ai_prompt(india_videos, worldwide_videos):
     compact_data = []
 
     for video in videos:
-
         compact_data.append({
             "country": video.get("country"),
             "title": video.get("title"),
@@ -261,7 +253,7 @@ IMPORTANT JSON RULES:
 9. Do not use "..." anywhere.
 10. Do not use "current UTC time" as the generated_at value.
 11. generated_at must be exactly:
-   "{now}"
+    "{now}"
 
 Required structure:
 
@@ -310,22 +302,9 @@ def clean_ai_response(text):
 
     # Remove markdown fences.
     if "```" in text:
-
-        text = text.replace(
-            "```json",
-            "",
-        )
-
-        text = text.replace(
-            "```JSON",
-            "",
-        )
-
-        text = text.replace(
-            "```",
-            "",
-        )
-
+        text = text.replace("```json", "",)
+        text = text.replace("```JSON", "",)
+        text = text.replace("```", "",)
         text = text.strip()
 
     return text
@@ -339,46 +318,26 @@ def extract_json_object(text):
 
     text = clean_ai_response(text)
 
-    # --------------------------------------------------------
     # First attempt: entire response is JSON.
-    # --------------------------------------------------------
-
     try:
         data = json.loads(text)
-
         if isinstance(data, dict):
             return data
-
     except json.JSONDecodeError:
         pass
 
-    # --------------------------------------------------------
-    # Second attempt: locate JSON object using JSONDecoder.
-    # This handles AI reasoning before/after JSON.
-    # --------------------------------------------------------
-
+    # Second attempt: locate JSON object in the text.
     decoder = json.JSONDecoder()
 
-    positions = [
-        i for i, char in enumerate(text)
-        if char == "{"
-    ]
+    positions = [i for i, char in enumerate(text) if char == "{"]
 
     candidates = []
 
     for position in positions:
-
         try:
-            obj, end = decoder.raw_decode(
-                text[position:]
-            )
-
+            obj, end = decoder.raw_decode(text[position:])
             if isinstance(obj, dict):
-
-                candidates.append(
-                    (position, end, obj)
-                )
-
+                candidates.append((position, end, obj))
         except json.JSONDecodeError:
             continue
 
@@ -389,17 +348,12 @@ def extract_json_object(text):
             + text[:5000]
         )
 
-    # Prefer candidate containing ideas.
     for _, _, obj in candidates:
-
         if isinstance(obj.get("ideas"), list):
             return obj
 
-    # Otherwise return largest dictionary.
     candidates.sort(
-        key=lambda item: len(
-            json.dumps(item[2])
-        ),
+        key=lambda item: len(json.dumps(item[2])),
         reverse=True,
     )
 
@@ -424,11 +378,9 @@ def validate_ai_result(data):
             "AI result does not contain an ideas list."
         )
 
-    # We need actual ideas, not the template.
     if len(ideas) < 10:
         raise RuntimeError(
-            f"AI returned only {len(ideas)} ideas. "
-            "Expected 24."
+            f"AI returned only {len(ideas)} ideas. Expected 24."
         )
 
     required_fields = [
@@ -448,31 +400,22 @@ def validate_ai_result(data):
     valid_ideas = []
 
     for idea in ideas:
-
         if not isinstance(idea, dict):
             continue
 
-        # Reject obvious template placeholders.
-        values = json.dumps(
-            idea,
-            ensure_ascii=False,
-        )
+        values = json.dumps(idea, ensure_ascii=False)
 
         if "..." in values:
             continue
-
         if "real title" in values.lower():
             continue
-
         if "real hook" in values.lower():
             continue
-
         if "real story concept" in values.lower():
             continue
 
         missing = [
-            field
-            for field in required_fields
+            field for field in required_fields
             if not idea.get(field)
         ]
 
@@ -483,25 +426,16 @@ def validate_ai_result(data):
 
     if len(valid_ideas) < 10:
         raise RuntimeError(
-            "AI response contains too many invalid/"
-            "placeholder ideas."
+            "AI response contains too many invalid/placeholder ideas."
         )
 
-    # Keep exactly 24 when possible.
     valid_ideas = valid_ideas[:24]
 
-    # Re-number cleanly.
-    for index, idea in enumerate(
-        valid_ideas,
-        start=1,
-    ):
+    for index, idea in enumerate(valid_ideas, start=1):
         idea["rank"] = index
 
     data["ideas"] = valid_ideas
-
-    data["generated_at"] = (
-        datetime.now(timezone.utc).isoformat()
-    )
+    data["generated_at"] = datetime.now(timezone.utc).isoformat()
 
     return data
 
@@ -510,14 +444,51 @@ def validate_ai_result(data):
 # OPENROUTER
 # ============================================================
 
-def generate_high_ctr_ideas(
-    india_videos,
-    worldwide_videos,
-):
+def extract_openrouter_content(result):
+    """
+    Safely extract text content from OpenRouter responses.
+    Handles None, normal string content, or list-based content blocks.
+    """
+    choices = result.get("choices") or []
+    if not choices:
+        return ""
 
-    print(
-        "Generating HIGH CTR + YouTube ideas..."
-    )
+    message = choices[0].get("message") or {}
+    content = message.get("content")
+
+    if content is None:
+        return ""
+
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                    continue
+
+                nested_content = item.get("content")
+                if isinstance(nested_content, str):
+                    parts.append(nested_content)
+                    continue
+
+                if item.get("type") == "text":
+                    text = item.get("text", "")
+                    if isinstance(text, str):
+                        parts.append(text)
+
+            elif item is not None:
+                parts.append(str(item))
+
+        return "".join(parts)
+
+    return str(content)
+
+
+def generate_high_ctr_ideas(india_videos, worldwide_videos):
+
+    print("Generating HIGH CTR + YouTube ideas...")
 
     prompt = build_ai_prompt(
         india_videos,
@@ -525,35 +496,20 @@ def generate_high_ctr_ideas(
     )
 
     headers = {
-        "Authorization":
-            f"Bearer {OPENROUTER_API_KEY}",
-
-        "Content-Type":
-            "application/json",
-
-        "HTTP-Referer":
-            "https://github.com/",
-
-        "X-Title":
-            "YouTube High CTR Idea Generator",
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/",
+        "X-Title": "YouTube High CTR Idea Generator",
     }
 
-    for attempt in range(
-        1,
-        AI_ATTEMPTS + 1,
-    ):
+    for attempt in range(1, AI_ATTEMPTS + 1):
 
         print("OPENROUTER REQUEST")
-        print(
-            f"Model: {OPENROUTER_MODEL}"
-        )
-        print(
-            f"Attempt: {attempt}"
-        )
+        print(f"Model: {OPENROUTER_MODEL}")
+        print(f"Attempt: {attempt}")
 
         payload = {
             "model": OPENROUTER_MODEL,
-
             "messages": [
                 {
                     "role": "system",
@@ -568,19 +524,12 @@ def generate_high_ctr_ideas(
                     "content": prompt,
                 },
             ],
-
-            # Important for OpenRouter JSON output.
-            "response_format": {
-                "type": "json_object"
-            },
-
+            "response_format": {"type": "json_object"},
             "temperature": 0.7,
-
             "max_tokens": 14000,
         }
 
         try:
-
             response = requests.post(
                 OPENROUTER_URL,
                 headers=headers,
@@ -588,110 +537,62 @@ def generate_high_ctr_ideas(
                 timeout=180,
             )
 
-            print(
-                f"HTTP status: "
-                f"{response.status_code}"
-            )
+            print(f"HTTP status: {response.status_code}")
 
             if response.status_code != 200:
-
-                print(
-                    "OpenRouter error:"
-                )
-
-                print(
-                    response.text[:3000]
-                )
-
+                print("OpenRouter error:")
+                print(response.text[:3000])
                 if attempt == AI_ATTEMPTS:
                     response.raise_for_status()
-
                 continue
 
-            result = response.json()
+            try:
+                result = response.json()
+            except ValueError:
+                print("OpenRouter response was not valid JSON:")
+                print(response.text[:3000])
+                if attempt == AI_ATTEMPTS:
+                    raise
+                continue
 
             print("OpenRouter SUCCESS")
 
-            model_used = result.get(
-                "model",
-                OPENROUTER_MODEL,
-            )
+            model_used = result.get("model", OPENROUTER_MODEL)
+            print(f"Model used: {model_used}")
 
-            print(
-                f"Model used: {model_used}"
-            )
-
-            choices = result.get(
-                "choices",
-                [],
-            )
-
+            choices = result.get("choices") or []
             if not choices:
+                raise RuntimeError("OpenRouter returned no choices.")
+
+            content = extract_openrouter_content(result)
+
+            if not content or not content.strip():
                 raise RuntimeError(
-                    "OpenRouter returned no choices."
+                    "OpenRouter returned empty content. Raw response: "
+                    + json.dumps(result, ensure_ascii=False)[:2000]
                 )
 
-            message = choices[0].get(
-                "message",
-                {},
-            )
+            print(f"AI response length: {len(content)} characters")
 
-            content = message.get(
-                "content",
-                "",
-            )
+            data = extract_json_object(content)
+            data = validate_ai_result(data)
 
-            # Some providers may put output elsewhere.
-            if isinstance(content, list):
-
-                content = "".join(
-                    item.get("text", "")
-                    if isinstance(item, dict)
-                    else str(item)
-                    for item in content
-                )
-
-            print(
-                f"AI response length: "
-                f"{len(content)} characters"
-            )
-
-            data = extract_json_object(
-                content
-            )
-
-            data = validate_ai_result(
-                data
-            )
-
-            print(
-                f"VALID AI RESULT: "
-                f"{len(data['ideas'])} ideas"
-            )
+            print(f"VALID AI RESULT: {len(data['ideas'])} ideas")
 
             return data
 
         except Exception as exc:
-
-            print(
-                f"AI attempt {attempt} failed: "
-                f"{type(exc).__name__}: {exc}"
-            )
+            print(f"AI attempt {attempt} failed: {type(exc).__name__}: {exc}")
 
             if attempt == AI_ATTEMPTS:
                 raise RuntimeError(
                     "OpenRouter failed after "
-                    f"{AI_ATTEMPTS} attempts: "
-                    f"{exc}"
+                    f"{AI_ATTEMPTS} attempts: {exc}"
                 ) from exc
 
-            print(
-                "Retrying OpenRouter..."
-            )
+            print("Retrying OpenRouter...")
 
-    raise RuntimeError(
-        "OpenRouter generation failed."
-    )
+    raise RuntimeError("OpenRouter generation failed.")
 
 
 # ============================================================
@@ -700,16 +601,9 @@ def generate_high_ctr_ideas(
 
 def save_json(data):
 
-    output_file = (
-        DATA_DIR /
-        "youtube_high_ctr_ideas.json"
-    )
+    output_file = DATA_DIR / "youtube_high_ctr_ideas.json"
 
-    with output_file.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-
+    with output_file.open("w", encoding="utf-8") as file:
         json.dump(
             data,
             file,
@@ -770,21 +664,13 @@ def safe_text(value):
     if value is None:
         return ""
 
-    if isinstance(
-        value,
-        (dict, list),
-    ):
-        value = json.dumps(
-            value,
-            ensure_ascii=False,
-        )
+    if isinstance(value, (dict, list)):
+        value = json.dumps(value, ensure_ascii=False)
 
-    # Prevent ReportLab XML problems.
     value = str(value)
 
     value = (
-        value
-        .replace("&", "&amp;")
+        value.replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
     )
@@ -792,29 +678,19 @@ def safe_text(value):
     return value
 
 
-def pdf_field(
-    label,
-    value,
-    styles,
-):
+def pdf_field(label, value, styles):
 
     return Paragraph(
-        f"<b>{label}:</b> "
-        f"{safe_text(value)}",
+        f"<b>{label}:</b> {safe_text(value)}",
         styles["CTRBody"],
     )
 
 
 def create_pdf(data):
 
-    print_section(
-        "CREATING PDF"
-    )
+    print_section("CREATING PDF")
 
-    pdf_file = (
-        OUTPUT_DIR /
-        "youtube_high_ctr_ideas.pdf"
-    )
+    pdf_file = OUTPUT_DIR / "youtube_high_ctr_ideas.pdf"
 
     styles = create_pdf_styles()
 
@@ -847,140 +723,46 @@ def create_pdf(data):
 
     story.append(
         Paragraph(
-            "<b>Generated:</b> "
-            + safe_text(
-                data.get("generated_at")
-            ),
+            "<b>Generated:</b> " + safe_text(data.get("generated_at")),
             styles["CTRBody"],
         )
     )
 
     story.append(
         Paragraph(
-            "<b>Total Ideas:</b> "
-            + str(
-                len(
-                    data.get(
-                        "ideas",
-                        [],
-                    )
-                )
-            ),
+            "<b>Total Ideas:</b> " + str(len(data.get("ideas", []))),
             styles["CTRBody"],
         )
     )
 
-    story.append(
-        Spacer(1, 10)
-    )
+    story.append(Spacer(1, 10))
 
-    ideas = data.get(
-        "ideas",
-        [],
-    )
+    ideas = data.get("ideas", [])
 
-    for index, idea in enumerate(
-        ideas,
-        start=1,
-    ):
-
-        title = idea.get(
-            "title",
-            f"Idea {index}",
-        )
+    for index, idea in enumerate(ideas, start=1):
+        title = idea.get("title", f"Idea {index}")
 
         story.append(
             Paragraph(
-                f"{index}. "
-                f"{safe_text(title)}",
+                f"{index}. {safe_text(title)}",
                 styles["CTRHeading"],
             )
         )
 
+        story.append(pdf_field("Format", idea.get("format"), styles))
+        story.append(pdf_field("Genre", idea.get("genre"), styles))
+        story.append(pdf_field("Hook", idea.get("hook"), styles))
+        story.append(pdf_field("Concept", idea.get("concept"), styles))
         story.append(
-            pdf_field(
-                "Format",
-                idea.get("format"),
-                styles,
-            )
+            pdf_field("Why Viewers Will Click", idea.get("why_clickable"), styles)
         )
-
-        story.append(
-            pdf_field(
-                "Genre",
-                idea.get("genre"),
-                styles,
-            )
-        )
-
-        story.append(
-            pdf_field(
-                "Hook",
-                idea.get("hook"),
-                styles,
-            )
-        )
-
-        story.append(
-            pdf_field(
-                "Concept",
-                idea.get("concept"),
-                styles,
-            )
-        )
-
-        story.append(
-            pdf_field(
-                "Why Viewers Will Click",
-                idea.get(
-                    "why_clickable"
-                ),
-                styles,
-            )
-        )
-
-        story.append(
-            pdf_field(
-                "Thumbnail",
-                idea.get(
-                    "thumbnail"
-                ),
-                styles,
-            )
-        )
-
-        story.append(
-            pdf_field(
-                "Twist / Reveal",
-                idea.get("twist"),
-                styles,
-            )
-        )
-
-        story.append(
-            pdf_field(
-                "Difficulty",
-                idea.get(
-                    "difficulty"
-                ),
-                styles,
-            )
-        )
-
-        story.append(
-            pdf_field(
-                "Duration",
-                idea.get(
-                    "duration"
-                ),
-                styles,
-            )
-        )
+        story.append(pdf_field("Thumbnail", idea.get("thumbnail"), styles))
+        story.append(pdf_field("Twist / Reveal", idea.get("twist"), styles))
+        story.append(pdf_field("Difficulty", idea.get("difficulty"), styles))
+        story.append(pdf_field("Duration", idea.get("duration"), styles))
 
         if index < len(ideas):
-            story.append(
-                PageBreak()
-            )
+            story.append(PageBreak())
 
     document.build(story)
 
@@ -994,30 +776,14 @@ def create_pdf(data):
 # RESEND
 # ============================================================
 
-def send_email(
-    pdf_file,
-    json_file,
-):
+def send_email(pdf_file, json_file):
 
-    print_section(
-        "SENDING EMAIL"
-    )
+    print_section("SENDING EMAIL")
 
-    resend_url = (
-        "https://api.resend.com/emails"
-    )
+    resend_url = "https://api.resend.com/emails"
 
-    timestamp = (
-        datetime.now(timezone.utc)
-        .strftime(
-            "%Y-%m-%d %H:%M UTC"
-        )
-    )
-
-    subject = (
-        "YouTube High CTR Ideas - "
-        + timestamp
-    )
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    subject = "YouTube High CTR Ideas - " + timestamp
 
     body = """Hello,
 
@@ -1035,51 +801,32 @@ Regards,
 YouTube High CTR Idea Generator
 """
 
-    with open(
-        pdf_file,
-        "rb",
-    ) as file:
-        pdf_base64 = base64.b64encode(
-            file.read()
-        ).decode("utf-8")
+    with open(pdf_file, "rb") as file:
+        pdf_base64 = base64.b64encode(file.read()).decode("utf-8")
 
-    with open(
-        json_file,
-        "rb",
-    ) as file:
-        json_base64 = base64.b64encode(
-            file.read()
-        ).decode("utf-8")
+    with open(json_file, "rb") as file:
+        json_base64 = base64.b64encode(file.read()).decode("utf-8")
 
     payload = {
         "from": FROM_EMAIL,
-        "to": [
-            RECIPIENT_EMAIL
-        ],
+        "to": [RECIPIENT_EMAIL],
         "subject": subject,
         "text": body,
         "attachments": [
             {
-                "filename":
-                    "youtube_high_ctr_ideas.pdf",
-                "content":
-                    pdf_base64,
+                "filename": "youtube_high_ctr_ideas.pdf",
+                "content": pdf_base64,
             },
             {
-                "filename":
-                    "youtube_high_ctr_ideas.json",
-                "content":
-                    json_base64,
+                "filename": "youtube_high_ctr_ideas.json",
+                "content": json_base64,
             },
         ],
     }
 
     headers = {
-        "Authorization":
-            f"Bearer {RESEND_API_KEY}",
-
-        "Content-Type":
-            "application/json",
+        "Authorization": f"Bearer {RESEND_API_KEY}",
+        "Content-Type": "application/json",
     }
 
     response = requests.post(
@@ -1089,29 +836,14 @@ YouTube High CTR Idea Generator
         timeout=60,
     )
 
-    print(
-        f"Resend HTTP status: "
-        f"{response.status_code}"
-    )
+    print(f"Resend HTTP status: {response.status_code}")
 
-    if response.status_code not in (
-        200,
-        201,
-    ):
-
-        print(
-            "Resend response:"
-        )
-
-        print(
-            response.text[:5000]
-        )
-
+    if response.status_code not in (200, 201):
+        print("Resend response:")
+        print(response.text[:5000])
         response.raise_for_status()
 
-    print(
-        "EMAIL SENT SUCCESSFULLY"
-    )
+    print("EMAIL SENT SUCCESSFULLY")
 
 
 # ============================================================
@@ -1121,103 +853,29 @@ YouTube High CTR Idea Generator
 def main():
 
     print_line()
-
-    print(
-        "STARTING YOUTUBE HIGH CTR "
-        "IDEA GENERATOR"
-    )
-
+    print("STARTING YOUTUBE HIGH CTR IDEA GENERATOR")
     print_line()
-
-    # --------------------------------------------------------
-    # 1. Environment
-    # --------------------------------------------------------
 
     check_environment()
 
-    # --------------------------------------------------------
-    # 2. India
-    # --------------------------------------------------------
+    print("1. Collecting India trends...")
+    india_videos = collect_youtube_most_popular("IN", 50)
 
-    print(
-        "1. Collecting India trends..."
+    print("2. Collecting worldwide proxy trends...")
+    worldwide_videos = collect_youtube_most_popular("US", 50)
+
+    print("Generating HIGH CTR + YouTube ideas...")
+    ideas_data = generate_high_ctr_ideas(
+        india_videos,
+        worldwide_videos,
     )
 
-    india_videos = (
-        collect_youtube_most_popular(
-            "IN",
-            50,
-        )
-    )
-
-    # --------------------------------------------------------
-    # 3. Worldwide proxy
-    # --------------------------------------------------------
-
-    print(
-        "2. Collecting worldwide "
-        "proxy trends..."
-    )
-
-    worldwide_videos = (
-        collect_youtube_most_popular(
-            "US",
-            50,
-        )
-    )
-
-    # --------------------------------------------------------
-    # 4. AI
-    # --------------------------------------------------------
-
-    print(
-        "Generating HIGH CTR + "
-        "YouTube ideas..."
-    )
-
-    ideas_data = (
-        generate_high_ctr_ideas(
-            india_videos,
-            worldwide_videos,
-        )
-    )
-
-    # --------------------------------------------------------
-    # 5. JSON
-    # --------------------------------------------------------
-
-    json_file = save_json(
-        ideas_data
-    )
-
-    # --------------------------------------------------------
-    # 6. PDF
-    # --------------------------------------------------------
-
-    pdf_file = create_pdf(
-        ideas_data
-    )
-
-    # --------------------------------------------------------
-    # 7. Email
-    # --------------------------------------------------------
-
-    send_email(
-        pdf_file,
-        json_file,
-    )
-
-    # --------------------------------------------------------
-    # DONE
-    # --------------------------------------------------------
+    json_file = save_json(ideas_data)
+    pdf_file = create_pdf(ideas_data)
+    send_email(pdf_file, json_file)
 
     print_line()
-
-    print(
-        "GENERATOR COMPLETED "
-        "SUCCESSFULLY"
-    )
-
+    print("GENERATOR COMPLETED SUCCESSFULLY")
     print_line()
 
 
@@ -1228,26 +886,13 @@ def main():
 if __name__ == "__main__":
 
     try:
-
         main()
 
     except KeyboardInterrupt:
-
-        print(
-            "\nProcess interrupted."
-        )
-
+        print("\nProcess interrupted.")
         sys.exit(130)
 
     except Exception as exc:
-
-        print_section(
-            "FATAL ERROR"
-        )
-
-        print(
-            f"{type(exc).__name__}: "
-            f"{exc}"
-        )
-
+        print_section("FATAL ERROR")
+        print(f"{type(exc).__name__}: {exc}")
         sys.exit(1)

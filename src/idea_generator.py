@@ -26,25 +26,39 @@ load_dotenv(BASE_DIR / ".env")
 # ENVIRONMENT
 # ============================================================
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_API_KEY = os.getenv(
+    "GEMINI_API_KEY",
+    ""
+).strip()
+
 GEMINI_MODEL = os.getenv(
     "GEMINI_MODEL",
     "gemini-2.5-flash"
 ).strip()
 
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_API_KEY = os.getenv(
+    "OPENROUTER_API_KEY",
+    ""
+).strip()
+
 OPENROUTER_MODEL = os.getenv(
     "OPENROUTER_MODEL",
     "google/gemini-2.5-flash"
 ).strip()
 
-IDEAS_PER_SECTION = int(
-    os.getenv("IDEAS_PER_SECTION", "8")
-)
+try:
+    IDEAS_PER_SECTION = int(
+        os.getenv("IDEAS_PER_SECTION", "8")
+    )
+except ValueError:
+    IDEAS_PER_SECTION = 8
 
-REQUEST_TIMEOUT = int(
-    os.getenv("REQUEST_TIMEOUT", "180")
-)
+try:
+    REQUEST_TIMEOUT = int(
+        os.getenv("REQUEST_TIMEOUT", "180")
+    )
+except ValueError:
+    REQUEST_TIMEOUT = 180
 
 
 # ============================================================
@@ -100,8 +114,8 @@ SECTION_DEFINITIONS = [
 # ============================================================
 
 SYSTEM_PROMPT = """
-You are an elite YouTube creative strategist, viral-content researcher,
-screenwriter and high-CTR idea generator.
+You are an elite YouTube creative strategist, viral-content
+researcher, screenwriter and high-CTR idea generator.
 
 Your job is NOT to generate generic YouTube ideas.
 
@@ -109,7 +123,7 @@ Every idea must create the reaction:
 
 "WAH! WHAT AN IDEA!"
 
-The concepts must contain at least one strong curiosity mechanism:
+The concept should contain at least one strong curiosity mechanism:
 
 - mystery
 - unanswered question
@@ -143,7 +157,7 @@ STRICTLY AVOID:
 - generic "I tried X"
 - generic AI videos
 - generic horror stories
-- generic "scary things"
+- generic scary videos
 - copied movie plots
 - boring trend summaries
 - filler concepts
@@ -215,7 +229,15 @@ Each idea must include:
 
 Do not give every idea a 95+ score.
 
-Reserve 90+ for genuinely exceptional ideas.
+Reserve 90+ for genuinely exceptional concepts.
+
+IMPORTANT OUTPUT RULE:
+
+Do not use Markdown headings.
+
+Do not use # characters.
+
+Return valid JSON only when asked for JSON.
 """
 
 
@@ -223,17 +245,9 @@ Reserve 90+ for genuinely exceptional ideas.
 # DATA NORMALIZATION
 # ============================================================
 
-def normalize_data(data: Any) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Converts whatever the trend collector returns into:
-
-    {
-        "india": [...],
-        "world": [...],
-        "genres": [...],
-        "all": [...]
-    }
-    """
+def normalize_data(
+    data: Any
+) -> Dict[str, List[Dict[str, Any]]]:
 
     result = {
         "india": [],
@@ -265,17 +279,18 @@ def normalize_data(data: Any) -> Dict[str, List[Dict[str, Any]]]:
     ]
 
     for key in india_keys:
+
         value = data.get(key)
 
         if isinstance(value, list):
             result["india"].extend(value)
 
         elif isinstance(value, dict):
-            result["india"].extend(
-                value.get("videos", [])
-                if isinstance(value.get("videos"), list)
-                else []
-            )
+
+            videos = value.get("videos", [])
+
+            if isinstance(videos, list):
+                result["india"].extend(videos)
 
     # --------------------------------------------------------
     # WORLD
@@ -291,17 +306,18 @@ def normalize_data(data: Any) -> Dict[str, List[Dict[str, Any]]]:
     ]
 
     for key in world_keys:
+
         value = data.get(key)
 
         if isinstance(value, list):
             result["world"].extend(value)
 
         elif isinstance(value, dict):
-            result["world"].extend(
-                value.get("videos", [])
-                if isinstance(value.get("videos"), list)
-                else []
-            )
+
+            videos = value.get("videos", [])
+
+            if isinstance(videos, list):
+                result["world"].extend(videos)
 
     # --------------------------------------------------------
     # GENRES
@@ -315,44 +331,68 @@ def normalize_data(data: Any) -> Dict[str, List[Dict[str, Any]]]:
     ]
 
     for key in genre_keys:
+
         value = data.get(key)
 
         if isinstance(value, list):
+
             result["genres"].extend(value)
 
         elif isinstance(value, dict):
+
             for genre_name, genre_data in value.items():
 
                 if isinstance(genre_data, list):
+
                     for item in genre_data:
+
                         if isinstance(item, dict):
-                            item = dict(item)
-                            item.setdefault("genre", genre_name)
-                            result["genres"].append(item)
+
+                            item_copy = dict(item)
+
+                            item_copy.setdefault(
+                                "genre",
+                                genre_name
+                            )
+
+                            result["genres"].append(
+                                item_copy
+                            )
 
                 elif isinstance(genre_data, dict):
-                    item = dict(genre_data)
-                    item.setdefault("genre", genre_name)
-                    result["genres"].append(item)
+
+                    item_copy = dict(genre_data)
+
+                    item_copy.setdefault(
+                        "genre",
+                        genre_name
+                    )
+
+                    result["genres"].append(
+                        item_copy
+                    )
 
     # --------------------------------------------------------
-    # GENERAL VIDEOS / TRENDS
+    # GENERAL DATA
     # --------------------------------------------------------
 
-    for key in [
+    general_keys = [
         "all",
         "videos",
         "trends",
         "data",
         "results",
-    ]:
+    ]
+
+    for key in general_keys:
+
         value = data.get(key)
 
         if isinstance(value, list):
             result["all"].extend(value)
 
     # --------------------------------------------------------
-    # IF INDIA/WORLD WERE NOT FOUND, USE ALL DATA
+    # FALLBACK
     # --------------------------------------------------------
 
     if not result["india"] and result["all"]:
@@ -362,17 +402,21 @@ def normalize_data(data: Any) -> Dict[str, List[Dict[str, Any]]]:
         result["world"] = result["all"][:35]
 
     # --------------------------------------------------------
-    # DEDUPLICATE
+    # CLEAN / DEDUPLICATE
     # --------------------------------------------------------
 
     for key in result:
+
         seen = set()
         clean = []
 
         for item in result[key]:
 
             if isinstance(item, str):
-                item = {"title": item}
+
+                item = {
+                    "title": item
+                }
 
             if not isinstance(item, dict):
                 continue
@@ -415,33 +459,51 @@ def compact_items(
             continue
 
         cleaned = {
-            "title": item.get("title")
-            or item.get("name")
-            or "",
-            "channel": item.get("channel")
-            or item.get("channel_title")
-            or "",
-            "views": item.get("views")
-            or item.get("view_count")
-            or 0,
-            "likes": item.get("likes")
-            or item.get("like_count")
-            or 0,
-            "comments": item.get("comments")
-            or item.get("comment_count")
-            or 0,
-            "published_at": item.get("published_at")
-            or item.get("published")
-            or "",
-            "category": item.get("category")
-            or item.get("category_name")
-            or "",
-            "genre": item.get("genre")
-            or item.get("subgenre")
-            or "",
-            "url": item.get("url")
-            or item.get("video_url")
-            or "",
+            "title": (
+                item.get("title")
+                or item.get("name")
+                or ""
+            ),
+            "channel": (
+                item.get("channel")
+                or item.get("channel_title")
+                or ""
+            ),
+            "views": (
+                item.get("views")
+                or item.get("view_count")
+                or 0
+            ),
+            "likes": (
+                item.get("likes")
+                or item.get("like_count")
+                or 0
+            ),
+            "comments": (
+                item.get("comments")
+                or item.get("comment_count")
+                or 0
+            ),
+            "published_at": (
+                item.get("published_at")
+                or item.get("published")
+                or ""
+            ),
+            "category": (
+                item.get("category")
+                or item.get("category_name")
+                or ""
+            ),
+            "genre": (
+                item.get("genre")
+                or item.get("subgenre")
+                or ""
+            ),
+            "url": (
+                item.get("url")
+                or item.get("video_url")
+                or ""
+            ),
         }
 
         output.append(cleaned)
@@ -450,13 +512,18 @@ def compact_items(
 
 
 # ============================================================
-# AI CALL — GEMINI
+# GEMINI
 # ============================================================
 
-def call_gemini(prompt: str) -> Dict[str, Any]:
+def call_gemini(
+    prompt: str
+) -> Dict[str, Any]:
 
     if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is not configured.")
+
+        raise RuntimeError(
+            "GEMINI_API_KEY is not configured."
+        )
 
     url = (
         "https://generativelanguage.googleapis.com/"
@@ -505,33 +572,57 @@ def call_gemini(prompt: str) -> Dict[str, Any]:
     body = response.json()
 
     try:
-        text = body["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError, TypeError) as exc:
+
+        text = (
+            body["candidates"][0]
+            ["content"]["parts"][0]
+            ["text"]
+        )
+
+    except (
+        KeyError,
+        IndexError,
+        TypeError
+    ) as exc:
+
         raise RuntimeError(
-            f"Unexpected Gemini response: {json.dumps(body)[:2000]}"
+            "Unexpected Gemini response: "
+            + json.dumps(
+                body,
+                ensure_ascii=False
+            )[:3000]
         ) from exc
 
     return parse_json_response(text)
 
 
 # ============================================================
-# AI CALL — OPENROUTER
+# OPENROUTER
 # ============================================================
 
-def call_openrouter(prompt: str) -> Dict[str, Any]:
+def call_openrouter(
+    prompt: str
+) -> Dict[str, Any]:
 
     if not OPENROUTER_API_KEY:
+
         raise RuntimeError(
             "OPENROUTER_API_KEY is not configured."
         )
 
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url = (
+        "https://openrouter.ai/api/v1/chat/completions"
+    )
 
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": (
+            f"Bearer {OPENROUTER_API_KEY}"
+        ),
         "Content-Type": "application/json",
         "HTTP-Referer": "https://github.com/",
-        "X-Title": "YouTube High CTR Idea Generator",
+        "X-Title": (
+            "YouTube High CTR Idea Generator"
+        ),
     }
 
     payload = {
@@ -563,10 +654,24 @@ def call_openrouter(prompt: str) -> Dict[str, Any]:
     body = response.json()
 
     try:
-        text = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
+
+        text = (
+            body["choices"][0]
+            ["message"]["content"]
+        )
+
+    except (
+        KeyError,
+        IndexError,
+        TypeError
+    ) as exc:
+
         raise RuntimeError(
-            f"Unexpected OpenRouter response: {json.dumps(body)[:2000]}"
+            "Unexpected OpenRouter response: "
+            + json.dumps(
+                body,
+                ensure_ascii=False
+            )[:3000]
         ) from exc
 
     return parse_json_response(text)
@@ -576,14 +681,18 @@ def call_openrouter(prompt: str) -> Dict[str, Any]:
 # JSON PARSER
 # ============================================================
 
-def parse_json_response(text: str) -> Dict[str, Any]:
+def parse_json_response(
+    text: str
+) -> Dict[str, Any]:
 
     if not text:
-        raise ValueError("AI returned empty response.")
+        raise ValueError(
+            "AI returned empty response."
+        )
 
     text = text.strip()
 
-    # Remove markdown fences
+    # Remove Markdown code fences
     text = re.sub(
         r"^```(?:json)?\s*",
         "",
@@ -598,55 +707,77 @@ def parse_json_response(text: str) -> Dict[str, Any]:
         flags=re.IGNORECASE,
     )
 
+    # Direct JSON
     try:
+
         parsed = json.loads(text)
 
         if isinstance(parsed, dict):
             return parsed
 
-        return {
-            "ideas": parsed
-            if isinstance(parsed, list)
-            else []
-        }
+        if isinstance(parsed, list):
+
+            return {
+                "ideas": parsed
+            }
 
     except json.JSONDecodeError:
+        pass
 
-        # Try extracting first JSON object
-        start = text.find("{")
-        end = text.rfind("}")
+    # JSON object extraction
+    start = text.find("{")
+    end = text.rfind("}")
 
-        if start != -1 and end != -1 and end > start:
+    if (
+        start != -1
+        and end != -1
+        and end > start
+    ):
 
-            candidate = text[start:end + 1]
+        candidate = text[
+            start:end + 1
+        ]
 
-            try:
-                parsed = json.loads(candidate)
+        try:
 
-                if isinstance(parsed, dict):
-                    return parsed
+            parsed = json.loads(
+                candidate
+            )
 
-            except json.JSONDecodeError:
-                pass
+            if isinstance(parsed, dict):
+                return parsed
 
-        # Try extracting JSON array
-        start = text.find("[")
-        end = text.rfind("]")
+        except json.JSONDecodeError:
+            pass
 
-        if start != -1 and end != -1 and end > start:
+    # JSON array extraction
+    start = text.find("[")
+    end = text.rfind("]")
 
-            candidate = text[start:end + 1]
+    if (
+        start != -1
+        and end != -1
+        and end > start
+    ):
 
-            try:
-                parsed = json.loads(candidate)
+        candidate = text[
+            start:end + 1
+        ]
 
-                if isinstance(parsed, list):
-                    return {
-                        "ideas": parsed
-                    }
+        try:
 
-            except json.JSONDecodeError:
-                pass
+            parsed = json.loads(
+                candidate
+            )
+
+            if isinstance(parsed, list):
+
+                return {
+                    "ideas": parsed
+                }
+
+        except json.JSONDecodeError:
+            pass
 
     raise ValueError(
         "Could not parse AI response as JSON.\n"
@@ -658,7 +789,9 @@ def parse_json_response(text: str) -> Dict[str, Any]:
 # AI ROUTER
 # ============================================================
 
-def call_ai(prompt: str) -> Dict[str, Any]:
+def call_ai(
+    prompt: str
+) -> Dict[str, Any]:
 
     if GEMINI_API_KEY:
         return call_gemini(prompt)
@@ -668,7 +801,8 @@ def call_ai(prompt: str) -> Dict[str, Any]:
 
     raise RuntimeError(
         "No AI API key configured. "
-        "Set GEMINI_API_KEY or OPENROUTER_API_KEY in GitHub Secrets/.env."
+        "Set GEMINI_API_KEY or "
+        "OPENROUTER_API_KEY."
     )
 
 
@@ -676,11 +810,13 @@ def call_ai(prompt: str) -> Dict[str, Any]:
 # SECTION INSTRUCTIONS
 # ============================================================
 
-def get_section_instruction(section_id: int) -> str:
+def get_section_instruction(
+    section_id: int
+) -> str:
 
-    if section_id == 1:
+    instructions = {
 
-        return """
+        1: """
 SECTION 1 — INDIA YOUTUBE TRENDS
 
 Analyze India YouTube trends.
@@ -697,15 +833,13 @@ For every trend provide:
 - why it is trending
 - audience psychology
 - format
-- entertainment genre/subgenre when applicable
-- opportunity for creators
+- entertainment genre/subgenre
+- creator opportunity
 
-Do NOT invent trend statistics that are not present in the supplied data.
-"""
+Do not invent statistics.
+""",
 
-    if section_id == 2:
-
-        return """
+        2: """
 SECTION 2 — WORLD YOUTUBE TRENDS
 
 Analyze World YouTube trends.
@@ -718,19 +852,17 @@ B. Shorts trends
 For every trend provide:
 
 - trend
-- example videos/titles from supplied data
-- why it is trending
+- example videos/titles
+- why trending
 - audience psychology
 - format
-- entertainment genre/subgenre when applicable
-- opportunity for creators
+- entertainment genre/subgenre
+- creator opportunity
 
-Do NOT invent statistics.
-"""
+Do not invent statistics.
+""",
 
-    if section_id == 3:
-
-        return """
+        3: """
 SECTION 3 — YOUTUBE GENRE TRENDS
 
 Identify strong genres and entertainment subgenres.
@@ -759,23 +891,18 @@ Fantasy
 Explain:
 
 - why the genre works
-- what viewer emotion it triggers
+- viewer emotion
 - longform opportunity
 - Shorts opportunity
 - typical hooks
-- what makes the genre clickable
-"""
+- clickability
+""",
 
-    if section_id == 4:
-
-        return """
+        4: """
 SECTION 4 — TREND-BASED SHORTS IDEAS
 
-Generate highly original Shorts concepts based on India and World trends.
-
-IMPORTANT:
-
-The idea itself comes FIRST.
+Generate highly original Shorts concepts based on India
+and World trends.
 
 Each idea must contain:
 
@@ -797,14 +924,13 @@ Each idea must contain:
 16. Emotional impact score
 
 Avoid generic Shorts.
-"""
+""",
 
-    if section_id == 5:
-
-        return """
+        5: """
 SECTION 5 — TREND-BASED LONGFORM IDEAS
 
-Generate original 8–10 minute concepts using India and World trends.
+Generate original 8–10 minute concepts using India
+and World trends.
 
 Use:
 
@@ -839,17 +965,15 @@ Each idea must contain:
 19. Feasibility score
 20. Emotional impact score
 
-Do NOT produce generic challenge/vlog/reaction concepts.
-"""
+Do not produce generic challenge,
+vlog or reaction concepts.
+""",
 
-    if section_id == 6:
-
-        return """
+        6: """
 SECTION 6 — GENERAL ORIGINAL SHORTS IDEAS
 
-Generate original Shorts ideas that do NOT depend on current trends.
-
-They should still feel highly clickable.
+Generate original Shorts ideas that do not depend
+on current trends.
 
 Use:
 
@@ -860,17 +984,17 @@ IS THAT REALLY POSSIBLE?
 
 Each idea needs a strong curiosity gap.
 
-Avoid generic facts, motivation, pranks, reactions and challenges.
+Avoid generic facts, motivation, pranks,
+reactions and challenges.
 
-Include natural Roman Telugu logline.
-"""
+Include natural Roman Telugu.
+""",
 
-    if section_id == 7:
-
-        return """
+        7: """
 SECTION 7 — GENERAL ORIGINAL LONGFORM IDEAS
 
-Generate original 8–10 minute concepts that can work even without a current trend.
+Generate original 8–10 minute concepts that can work
+without a current trend.
 
 Every concept needs:
 
@@ -893,15 +1017,13 @@ Prioritize:
 - unexpected reversal
 - cinematic storytelling
 
-Include natural Roman Telugu logline.
-"""
+Include natural Roman Telugu.
+""",
 
-    if section_id == 8:
-
-        return """
+        8: """
 SECTION 8 — GENRE-FUSION HIGH CTR IDEAS
 
-Combine two or more genres to create concepts that feel fresh.
+Combine two or more genres to create fresh concepts.
 
 Examples:
 
@@ -913,7 +1035,7 @@ Emotional Drama + Mystery
 Horror + Dark Comedy
 Investigation + Survival
 
-Do not simply put two genre names together.
+Do not simply combine genre names.
 
 The combination must create a new story mechanism.
 
@@ -921,7 +1043,7 @@ Explain:
 
 - primary genre
 - secondary genre
-- why the combination works
+- why combination works
 - high CTR title
 - Roman Telugu logline
 - hook
@@ -929,40 +1051,51 @@ Explain:
 - twist
 - thumbnail
 - scores
-"""
+""",
+    }
+
+    return instructions.get(
+        section_id,
+        ""
+    )
 
 
 # ============================================================
-# PROMPT BUILDER
+# BUILD PROMPT
 # ============================================================
 
 def build_section_prompt(
     section_id: int,
     section_name: str,
-    trend_data: Dict[str, List[Dict[str, Any]]],
+    trend_data: Dict[
+        str,
+        List[Dict[str, Any]]
+    ],
 ) -> str:
 
     india = compact_items(
         trend_data.get("india", []),
-        35,
+        35
     )
 
     world = compact_items(
         trend_data.get("world", []),
-        35,
+        35
     )
 
     genres = compact_items(
         trend_data.get("genres", []),
-        35,
+        35
     )
 
     all_data = compact_items(
         trend_data.get("all", []),
-        35,
+        35
     )
 
-    instruction = get_section_instruction(section_id)
+    instruction = get_section_instruction(
+        section_id
+    )
 
     prompt = f"""
 Generate SECTION {section_id} — {section_name}.
@@ -970,28 +1103,49 @@ Generate SECTION {section_id} — {section_name}.
 {instruction}
 
 NUMBER OF IDEAS:
+
 {IDEAS_PER_SECTION}
 
 SUPPLIED INDIA TREND DATA:
-{json.dumps(india, ensure_ascii=False, indent=2)}
+
+{json.dumps(
+    india,
+    ensure_ascii=False,
+    indent=2
+)}
 
 SUPPLIED WORLD TREND DATA:
-{json.dumps(world, ensure_ascii=False, indent=2)}
+
+{json.dumps(
+    world,
+    ensure_ascii=False,
+    indent=2
+)}
 
 SUPPLIED GENRE DATA:
-{json.dumps(genres, ensure_ascii=False, indent=2)}
+
+{json.dumps(
+    genres,
+    ensure_ascii=False,
+    indent=2
+)}
 
 SUPPLIED GENERAL DATA:
-{json.dumps(all_data, ensure_ascii=False, indent=2)}
+
+{json.dumps(
+    all_data,
+    ensure_ascii=False,
+    indent=2
+)}
 
 IMPORTANT:
 
-Use the supplied data as evidence.
+Use supplied data as evidence.
 
-If the data does not support a specific factual claim,
-do not invent it.
+If data does not support a factual claim,
+do not invent statistics.
 
-However, creative ideas can be original.
+Creative ideas may be original.
 
 Return ONLY valid JSON.
 
@@ -1041,13 +1195,14 @@ Use exactly this structure:
   ]
 }}
 
-The "high_ctr_idea" must describe the actual compelling concept,
-not merely repeat the title.
+The high_ctr_idea must describe the actual concept.
 
-The Roman Telugu logline must be natural and cinematic.
+The Roman Telugu logline must be natural,
+cinematic and curiosity-driven.
 
-Return no markdown.
-Return no explanation outside JSON.
+Do not return Markdown.
+
+Do not use # characters.
 """
 
     return prompt
@@ -1060,56 +1215,66 @@ Return no explanation outside JSON.
 def generate_section(
     section_id: int,
     section_name: str,
-    trend_data: Dict[str, List[Dict[str, Any]]],
+    trend_data: Dict[
+        str,
+        List[Dict[str, Any]]
+    ],
 ) -> Dict[str, Any]:
 
     prompt = build_section_prompt(
         section_id,
         section_name,
-        trend_data,
+        trend_data
     )
 
     result = call_ai(prompt)
 
+    if not isinstance(result, dict):
+        result = {}
+
     result.setdefault(
         "section_id",
-        section_id,
+        section_id
     )
 
     result.setdefault(
         "section_name",
-        section_name,
+        section_name
     )
 
-    if not isinstance(result.get("trend_analysis"), list):
+    if not isinstance(
+        result.get("trend_analysis"),
+        list
+    ):
         result["trend_analysis"] = []
 
-    if not isinstance(result.get("ideas"), list):
+    if not isinstance(
+        result.get("ideas"),
+        list
+    ):
         result["ideas"] = []
 
     return result
 
 
 # ============================================================
-# MAIN FUNCTION
+# MAIN REPORT GENERATOR
 # ============================================================
 
-def generate_report(data: Any) -> Dict[str, Any]:
-    """
-    IMPORTANT:
-    app.py calls:
-
-        report = generate_report(data)
-
-    Therefore this function MUST accept data.
-    """
+def generate_report(
+    data: Any
+) -> Dict[str, Any]:
 
     trend_data = normalize_data(data)
 
     report = {
-        "generator": "YouTube High CTR Idea Generator",
-        "version": "4.0",
-        "quality_standard": "Very High Engagement",
+        "generator": (
+            "YouTube High CTR Idea Generator"
+        ),
+        "version": "5.0",
+        "quality_standard": (
+            "Very High Engagement"
+        ),
         "sections": [],
     }
 
@@ -1120,7 +1285,8 @@ def generate_report(data: Any) -> Dict[str, Any]:
 
         print(
             f"[AI] Generating section "
-            f"{section_id}/8: {section_name}"
+            f"{section_id}/8: "
+            f"{section_name}"
         )
 
         try:
@@ -1128,28 +1294,34 @@ def generate_report(data: Any) -> Dict[str, Any]:
             result = generate_section(
                 section_id,
                 section_name,
-                trend_data,
+                trend_data
             )
 
-            report["sections"].append(result)
+            report["sections"].append(
+                result
+            )
 
             idea_count = len(
-                result.get("ideas", [])
+                result.get(
+                    "ideas",
+                    []
+                )
             )
 
             print(
-                f"[AI] Section {section_id} complete "
+                f"[AI] Section "
+                f"{section_id} complete "
                 f"({idea_count} ideas)"
             )
 
         except Exception as exc:
 
             print(
-                f"[ERROR] Section {section_id} failed: "
+                f"[ERROR] Section "
+                f"{section_id} failed: "
                 f"{exc}"
             )
 
-            # Do NOT kill the entire GitHub Action.
             report["sections"].append(
                 {
                     "section_id": section_id,
@@ -1164,20 +1336,82 @@ def generate_report(data: Any) -> Dict[str, Any]:
 
 
 # ============================================================
+# CLEAN TEXT
+# ============================================================
+
+def clean_output_text(
+    text: str
+) -> str:
+
+    if not text:
+        return ""
+
+    # Remove ALL hashtag characters.
+    text = text.replace("#", "")
+
+    # Remove accidental Markdown code fences.
+    text = re.sub(
+        r"```(?:text|markdown|txt)?",
+        "",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    text = text.replace(
+        "```",
+        ""
+    )
+
+    # Remove excessive blank lines.
+    text = re.sub(
+        r"\n{4,}",
+        "\n\n\n",
+        text
+    )
+
+    return text.strip()
+
+
+# ============================================================
 # TEXT RENDERER
 # ============================================================
 
-def render_report(report: Dict[str, Any]) -> str:
+def render_report(
+    report: Dict[str, Any]
+) -> str:
 
     lines = []
 
-    lines.append("=" * 90)
-    lines.append("YOUTUBE HIGH CTR IDEA GENERATOR")
-    lines.append("VERY HIGH ENGAGEMENT EDITION")
-    lines.append("=" * 90)
+    # ========================================================
+    # TITLE
+    # ========================================================
+
+    lines.append(
+        "=" * 90
+    )
+
+    lines.append(
+        "YOUTUBE HIGH CTR IDEA GENERATOR"
+    )
+
+    lines.append(
+        "VERY HIGH ENGAGEMENT EDITION"
+    )
+
+    lines.append(
+        "=" * 90
+    )
+
     lines.append("")
 
-    for section in report.get("sections", []):
+    # ========================================================
+    # SECTIONS
+    # ========================================================
+
+    for section in report.get(
+        "sections",
+        []
+    ):
 
         section_id = section.get(
             "section_id",
@@ -1189,16 +1423,28 @@ def render_report(report: Dict[str, Any]) -> str:
             ""
         )
 
-        lines.append("#" * 90)
+        # IMPORTANT:
+        # No # characters here.
+
+        lines.append("")
         lines.append(
-            f"SECTION {section_id} — {section_name}"
+            "=" * 90
         )
-        lines.append("#" * 90)
+
+        lines.append(
+            f"SECTION {section_id} — "
+            f"{section_name}"
+        )
+
+        lines.append(
+            "=" * 90
+        )
+
         lines.append("")
 
-        # ----------------------------------------------------
+        # ====================================================
         # TREND ANALYSIS
-        # ----------------------------------------------------
+        # ====================================================
 
         trend_analysis = section.get(
             "trend_analysis",
@@ -1210,57 +1456,102 @@ def render_report(report: Dict[str, Any]) -> str:
             lines.append(
                 "TREND ANALYSIS"
             )
-            lines.append("-" * 90)
+
+            lines.append(
+                "-" * 90
+            )
+
+            lines.append("")
 
             for index, trend in enumerate(
                 trend_analysis,
-                start=1,
+                start=1
             ):
 
                 lines.append(
-                    f"{index}. {trend.get('trend', '')}"
+                    f"Trend {index}: "
+                    f"{trend.get('trend', '')}"
                 )
 
                 lines.append(
-                    f"   What is happening: "
-                    f"{trend.get('what_is_happening', '')}"
+                    "What is happening: "
+                    + str(
+                        trend.get(
+                            "what_is_happening",
+                            ""
+                        )
+                    )
                 )
 
                 lines.append(
-                    f"   Why trending: "
-                    f"{trend.get('why_trending', '')}"
+                    "Why trending: "
+                    + str(
+                        trend.get(
+                            "why_trending",
+                            ""
+                        )
+                    )
                 )
 
                 lines.append(
-                    f"   Audience psychology: "
-                    f"{trend.get('audience_psychology', '')}"
+                    "Audience psychology: "
+                    + str(
+                        trend.get(
+                            "audience_psychology",
+                            ""
+                        )
+                    )
                 )
 
                 lines.append(
-                    f"   Format: "
-                    f"{trend.get('format', '')}"
+                    "Format: "
+                    + str(
+                        trend.get(
+                            "format",
+                            ""
+                        )
+                    )
                 )
 
                 lines.append(
-                    f"   Genre: "
-                    f"{trend.get('genre', '')}"
+                    "Genre: "
+                    + str(
+                        trend.get(
+                            "genre",
+                            ""
+                        )
+                    )
                 )
 
                 lines.append(
-                    f"   Subgenre: "
-                    f"{trend.get('subgenre', '')}"
+                    "Subgenre: "
+                    + str(
+                        trend.get(
+                            "subgenre",
+                            ""
+                        )
+                    )
                 )
 
                 lines.append(
-                    f"   Creator opportunity: "
-                    f"{trend.get('creator_opportunity', '')}"
+                    "Creator opportunity: "
+                    + str(
+                        trend.get(
+                            "creator_opportunity",
+                            ""
+                        )
+                    )
                 )
 
                 lines.append("")
+                lines.append(
+                    "-" * 60
+                )
+                lines.append("")
 
-        # ----------------------------------------------------
+        # ====================================================
         # IDEAS
-        # ----------------------------------------------------
+        # ====================================================
 
         ideas = section.get(
             "ideas",
@@ -1272,198 +1563,500 @@ def render_report(report: Dict[str, Any]) -> str:
             lines.append(
                 "HIGH CTR IDEAS"
             )
-            lines.append("-" * 90)
+
+            lines.append(
+                "-" * 90
+            )
+
             lines.append("")
 
         for index, idea in enumerate(
             ideas,
-            start=1,
+            start=1
         ):
+
+            if not isinstance(
+                idea,
+                dict
+            ):
+                continue
 
             title = (
                 idea.get("title")
-                or idea.get("high_ctr_idea")
+                or idea.get(
+                    "high_ctr_idea"
+                )
                 or f"Idea {index}"
             )
 
+            # =================================================
+            # TITLE
+            # =================================================
+
             lines.append(
-                f"{index}. {title}"
+                f"IDEA {index}: {title}"
             )
 
             lines.append("")
 
-            # MOST IMPORTANT:
-            # Logline immediately after title.
+            # =================================================
+            # LOGLINE FIRST
+            # =================================================
 
             lines.append(
-                "🔥 HIGH CTR IDEA LOGLINE"
+                "HIGH CTR IDEA LOGLINE"
             )
 
             lines.append(
-                idea.get(
-                    "roman_telugu_logline",
-                    ""
+                str(
+                    idea.get(
+                        "roman_telugu_logline",
+                        ""
+                    )
                 )
             )
 
             lines.append("")
 
+            # =================================================
+            # GENRE
+            # =================================================
+
             lines.append(
-                f"Genre: {idea.get('genre', '')}"
+                "Genre: "
+                + str(
+                    idea.get(
+                        "genre",
+                        ""
+                    )
+                )
             )
 
             lines.append(
-                f"Subgenre: {idea.get('subgenre', '')}"
-            )
-
-            lines.append("")
-
-            lines.append(
-                f"🔥 High CTR Concept: "
-                f"{idea.get('high_ctr_idea', '')}"
-            )
-
-            lines.append(
-                f"Hook: {idea.get('hook', '')}"
-            )
-
-            lines.append(
-                f"Why people click: "
-                f"{idea.get('why_people_click', '')}"
-            )
-
-            lines.append(
-                f"Main question: "
-                f"{idea.get('main_question', '')}"
+                "Subgenre: "
+                + str(
+                    idea.get(
+                        "subgenre",
+                        ""
+                    )
+                )
             )
 
             lines.append("")
 
+            # =================================================
+            # HIGH CTR CONCEPT
+            # =================================================
+
             lines.append(
-                f"Story premise: "
-                f"{idea.get('story_premise', '')}"
+                "HIGH CTR CONCEPT"
             )
 
             lines.append(
-                f"Opening 30 seconds: "
-                f"{idea.get('opening_30_seconds', '')}"
-            )
-
-            lines.append(
-                f"Escalation: "
-                f"{idea.get('escalation', '')}"
-            )
-
-            lines.append(
-                f"Discovery: "
-                f"{idea.get('discovery', '')}"
-            )
-
-            lines.append(
-                f"Complication: "
-                f"{idea.get('complication', '')}"
-            )
-
-            lines.append(
-                f"Major reveal: "
-                f"{idea.get('major_reveal', '')}"
-            )
-
-            lines.append(
-                f"Twist / Payoff: "
-                f"{idea.get('twist_payoff', '')}"
-            )
-
-            lines.append(
-                f"Ending: "
-                f"{idea.get('ending', '')}"
+                str(
+                    idea.get(
+                        "high_ctr_idea",
+                        ""
+                    )
+                )
             )
 
             lines.append("")
 
+            # =================================================
+            # HOOK
+            # =================================================
+
             lines.append(
-                f"Thumbnail: "
-                f"{idea.get('thumbnail_concept', '')}"
+                "HOOK"
+            )
+
+            lines.append(
+                str(
+                    idea.get(
+                        "hook",
+                        ""
+                    )
+                )
             )
 
             lines.append("")
+
+            # =================================================
+            # WHY PEOPLE CLICK
+            # =================================================
+
+            lines.append(
+                "WHY PEOPLE CLICK"
+            )
+
+            lines.append(
+                str(
+                    idea.get(
+                        "why_people_click",
+                        ""
+                    )
+                )
+            )
+
+            lines.append("")
+
+            # =================================================
+            # MAIN QUESTION
+            # =================================================
+
+            lines.append(
+                "MAIN QUESTION"
+            )
+
+            lines.append(
+                str(
+                    idea.get(
+                        "main_question",
+                        ""
+                    )
+                )
+            )
+
+            lines.append("")
+
+            # =================================================
+            # STORY PREMISE
+            # =================================================
+
+            lines.append(
+                "STORY PREMISE"
+            )
+
+            lines.append(
+                str(
+                    idea.get(
+                        "story_premise",
+                        ""
+                    )
+                )
+            )
+
+            lines.append("")
+
+            # =================================================
+            # OPENING
+            # =================================================
+
+            lines.append(
+                "OPENING 30 SECONDS"
+            )
+
+            lines.append(
+                str(
+                    idea.get(
+                        "opening_30_seconds",
+                        ""
+                    )
+                )
+            )
+
+            lines.append("")
+
+            # =================================================
+            # ESCALATION
+            # =================================================
+
+            lines.append(
+                "ESCALATION"
+            )
+
+            lines.append(
+                str(
+                    idea.get(
+                        "escalation",
+                        ""
+                    )
+                )
+
+            lines.append("")
+
+            # =================================================
+            # DISCOVERY
+            # =================================================
+
+            lines.append(
+                "DISCOVERY"
+            )
+
+            lines.append(
+                str(
+                    idea.get(
+                        "discovery",
+                        ""
+                    )
+                )
+            )
+
+            lines.append("")
+
+            # =================================================
+            # COMPLICATION
+            # =================================================
+
+            lines.append(
+                "COMPLICATION"
+            )
+
+            lines.append(
+                str(
+                    idea.get(
+                        "complication",
+                        ""
+                    )
+                )
+            )
+
+            lines.append("")
+
+            # =================================================
+            # MAJOR REVEAL
+            # =================================================
+
+            lines.append(
+                "MAJOR REVEAL"
+            )
+
+            lines.append(
+                str(
+                    idea.get(
+                        "major_reveal",
+                        ""
+                    )
+                )
+            )
+
+            lines.append("")
+
+            # =================================================
+            # TWIST
+            # =================================================
+
+            lines.append(
+                "TWIST / PAYOFF"
+            )
+
+            lines.append(
+                str(
+                    idea.get(
+                        "twist_payoff",
+                        ""
+                    )
+                )
+            )
+
+            lines.append("")
+
+            # =================================================
+            # ENDING
+            # =================================================
+
+            lines.append(
+                "ENDING"
+            )
+
+            lines.append(
+                str(
+                    idea.get(
+                        "ending",
+                        ""
+                    )
+                )
+            )
+
+            lines.append("")
+
+            # =================================================
+            # THUMBNAIL
+            # =================================================
+
+            lines.append(
+                "THUMBNAIL CONCEPT"
+            )
+
+            lines.append(
+                str(
+                    idea.get(
+                        "thumbnail_concept",
+                        ""
+                    )
+                )
+            )
+
+            lines.append("")
+
+            # =================================================
+            # SCORES
+            # =================================================
 
             lines.append(
                 "SCORES"
             )
 
             lines.append(
-                f"CTR: "
-                f"{idea.get('ctr_score', 0)}/100"
+                "CTR: "
+                + str(
+                    idea.get(
+                        "ctr_score",
+                        0
+                    )
+                )
+                + "/100"
             )
 
             lines.append(
-                f"Retention: "
-                f"{idea.get('retention_score', 0)}/100"
+                "Retention: "
+                + str(
+                    idea.get(
+                        "retention_score",
+                        0
+                    )
+                )
+                + "/100"
             )
 
             lines.append(
-                f"Novelty: "
-                f"{idea.get('novelty_score', 0)}/100"
+                "Novelty: "
+                + str(
+                    idea.get(
+                        "novelty_score",
+                        0
+                    )
+                )
+                + "/100"
             )
 
             lines.append(
-                f"Feasibility: "
-                f"{idea.get('feasibility_score', 0)}/100"
+                "Feasibility: "
+                + str(
+                    idea.get(
+                        "feasibility_score",
+                        0
+                    )
+                )
+                + "/100"
             )
 
             lines.append(
-                f"Emotional Impact: "
-                f"{idea.get('emotional_impact_score', 0)}/100"
+                "Emotional Impact: "
+                + str(
+                    idea.get(
+                        "emotional_impact_score",
+                        0
+                    )
+                )
+                + "/100"
             )
 
             lines.append("")
-            lines.append("-" * 90)
+
+            lines.append(
+                "-" * 90
+            )
+
             lines.append("")
+
+        # ====================================================
+        # SECTION ERROR
+        # ====================================================
 
         if section.get("error"):
 
             lines.append(
-                f"SECTION ERROR: "
-                f"{section.get('error')}"
+                "SECTION ERROR"
+            )
+
+            lines.append(
+                str(
+                    section.get(
+                        "error"
+                    )
+                )
             )
 
             lines.append("")
 
-    return "\n".join(lines)
+    # ========================================================
+    # FINAL OUTPUT
+    # ========================================================
+
+    text = "\n".join(lines)
+
+    # FINAL GUARANTEE:
+    # Absolutely no hashtags in TXT.
+    text = clean_output_text(
+        text
+    )
+
+    return text
 
 
 # ============================================================
 # SAVE REPORT
 # ============================================================
 
-def save_report(report: Dict[str, Any]) -> Dict[str, str]:
+def save_report(
+    report: Dict[str, Any]
+) -> Dict[str, str]:
 
-    json_path = OUTPUT_DIR / "youtube_high_ctr_report.json"
-    txt_path = OUTPUT_DIR / "youtube_high_ctr_report.txt"
+    json_path = (
+        OUTPUT_DIR
+        / "youtube_high_ctr_report.json"
+    )
+
+    txt_path = (
+        OUTPUT_DIR
+        / "youtube_high_ctr_report.txt"
+    )
+
+    # --------------------------------------------------------
+    # SAVE JSON
+    # --------------------------------------------------------
 
     json_path.write_text(
         json.dumps(
             report,
             ensure_ascii=False,
-            indent=2,
+            indent=2
         ),
-        encoding="utf-8",
+        encoding="utf-8"
     )
 
-    text = render_report(report)
+    # --------------------------------------------------------
+    # RENDER TXT
+    # --------------------------------------------------------
+
+    text = render_report(
+        report
+    )
+
+    # --------------------------------------------------------
+    # FINAL HASHTAG REMOVAL
+    # --------------------------------------------------------
+
+    text = text.replace(
+        "#",
+        ""
+    )
 
     txt_path.write_text(
         text,
-        encoding="utf-8",
+        encoding="utf-8"
     )
 
     print(
-        f"[output] JSON -> {json_path}"
+        f"[output] JSON -> "
+        f"{json_path}"
     )
 
     print(
-        f"[output] TXT  -> {txt_path}"
+        f"[output] TXT  -> "
+        f"{txt_path}"
     )
 
     return {
@@ -1498,5 +2091,9 @@ if __name__ == "__main__":
     )
 
     print("")
-    print("Generation completed.")
-    print(paths)
+    print(
+        "Generation completed."
+    )
+
+    print(
+        paths

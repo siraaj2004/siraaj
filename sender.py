@@ -1,135 +1,183 @@
+from __future__ import annotations
+
+import mimetypes
 import os
-import sys
 import smtplib
-from pathlib import Path
+import ssl
+import sys
 from email.message import EmailMessage
+from pathlib import Path
 
 
-def send_email_with_attachment(
-    sender,
-    app_password,
-    recipient,
-    subject,
-    body,
-    attachment_path
-):
-    attachment = Path(attachment_path)
+def required_env(name: str) -> str:
+    value = os.getenv(name, "").strip()
 
-    if not attachment.exists():
-        raise FileNotFoundError(
-            f"Attachment not found: {attachment.resolve()}"
+    if not value:
+        raise RuntimeError(
+            f"Missing GitHub Secret: {name}"
         )
 
-    if not sender:
-        raise ValueError("GMAIL_USER is missing")
-
-    if not app_password:
-        raise ValueError("GMAIL_APP_PASSWORD is missing")
-
-    if not recipient:
-        raise ValueError("GMAIL_TO is missing")
-
-    print("=" * 70)
-    print("GMAIL EMAIL SENDING")
-    print("=" * 70)
-
-    print(f"From      : {sender}")
-    print(f"To        : {recipient}")
-    print(f"Subject   : {subject}")
-    print(f"Attachment: {attachment}")
-    print()
-
-    msg = EmailMessage()
-
-    msg["From"] = sender
-    msg["To"] = recipient
-    msg["Subject"] = subject
-
-    msg.set_content(body)
-
-    with open(attachment, "rb") as f:
-        file_data = f.read()
-
-    msg.add_attachment(
-        file_data,
-        maintype="application",
-        subtype="json",
-        filename=attachment.name
-    )
-
-    print("Connecting to Gmail SMTP...")
-
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as smtp:
-        smtp.ehlo()
-
-        print("Starting TLS...")
-        smtp.starttls()
-
-        smtp.ehlo()
-
-        print("Logging into Gmail...")
-        smtp.login(sender, app_password)
-
-        print("Sending email...")
-        smtp.send_message(msg)
-
-    print()
-    print("EMAIL SENT SUCCESSFULLY")
-    print("=" * 70)
+    return value
 
 
-def main():
-    sender = os.environ.get("GMAIL_USER", "").strip()
-    app_password = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
-    recipient = os.environ.get("GMAIL_TO", "").strip()
+def get_recipients(value: str) -> list[str]:
+    recipients = [
+        item.strip()
+        for item in value.replace(";", ",").split(",")
+        if item.strip()
+    ]
 
-    attachment = os.environ.get(
-        "YOUTUBE_RESULT_FILE",
-        "data/youtube_high_ctr_ideas.json"
-    )
+    if not recipients:
+        raise RuntimeError("GMAIL_TO is empty.")
 
-    subject = os.environ.get(
+    return recipients
+
+
+def send_email() -> None:
+    gmail_user = required_env("GMAIL_USER")
+
+    # Google App Password, NOT normal Gmail password
+    gmail_password = required_env("GMAIL_APP_PASSWORD").replace(" ", "")
+
+    gmail_to = required_env("GMAIL_TO")
+    recipients = get_recipients(gmail_to)
+
+    subject = os.getenv(
         "EMAIL_SUBJECT",
-        "YouTube High CTR Ideas"
+        "YouTube High CTR Idea Generator Report"
     )
 
-    body = """Hi Siraaj,
+    output_dir = Path("output")
 
-Your YouTube High CTR Idea Generator has completed successfully.
+    attachments = [
+        output_dir / "youtube_high_ctr_report.txt",
+        output_dir / "youtube_high_ctr_report.json",
+    ]
 
-The generated YouTube ideas are attached as:
+    message = EmailMessage()
 
-youtube_high_ctr_ideas.json
+    message["From"] = gmail_user
+    message["To"] = ", ".join(recipients)
+    message["Subject"] = subject
 
-The generator collected:
-- India YouTube trends
-- Worldwide/US proxy trends
-- Monetization strategy
-- High CTR video ideas
+    message.set_content(
+        """Hi Siraaj,
+
+Your YouTube High CTR Idea Generator report is ready.
+
+The generated report is attached as:
+
+1. youtube_high_ctr_report.txt
+2. youtube_high_ctr_report.json
+
+Important:
+If the report says OpenRouter returned 402 Payment Required,
+the generator used its offline fallback.
 
 Regards,
-YouTube AI Automation
+YouTube High CTR Idea Generator
 """
+    )
 
-    try:
-        send_email_with_attachment(
-            sender=sender,
-            app_password=app_password,
-            recipient=recipient,
-            subject=subject,
-            body=body,
-            attachment_path=attachment
+    attached_count = 0
+
+    for file_path in attachments:
+
+        if not file_path.exists():
+            print(f"[EMAIL] WARNING: File not found: {file_path}")
+            continue
+
+        if not file_path.is_file():
+            continue
+
+        mime_type, _ = mimetypes.guess_type(file_path.name)
+
+        if mime_type:
+            maintype, subtype = mime_type.split("/", 1)
+        else:
+            maintype = "application"
+            subtype = "octet-stream"
+
+        with file_path.open("rb") as file:
+            data = file.read()
+
+        message.add_attachment(
+            data,
+            maintype=maintype,
+            subtype=subtype,
+            filename=file_path.name,
         )
 
-    except Exception as e:
-        print()
-        print("=" * 70)
-        print("EMAIL FAILED")
-        print("=" * 70)
-        print(f"ERROR: {type(e).__name__}: {e}")
-        print("=" * 70)
-        sys.exit(1)
+        attached_count += 1
+
+        print(
+            f"[EMAIL] Attached: {file_path} "
+            f"({len(data)} bytes)"
+        )
+
+    if attached_count == 0:
+        raise RuntimeError(
+            "No report files were found in output/."
+        )
+
+    print("[EMAIL] Connecting to Gmail SMTP...")
+
+    context = ssl.create_default_context()
+
+    try:
+
+        with smtplib.SMTP_SSL(
+            "smtp.gmail.com",
+            465,
+            context=context,
+            timeout=30,
+        ) as smtp:
+
+            print("[EMAIL] Logging into Gmail...")
+
+            smtp.login(
+                gmail_user,
+                gmail_password,
+            )
+
+            print("[EMAIL] Sending email...")
+
+            smtp.send_message(message)
+
+    except smtplib.SMTPAuthenticationError as error:
+
+        raise RuntimeError(
+            "\n"
+            "GMAIL AUTHENTICATION FAILED.\n"
+            "\n"
+            "Check:\n"
+            "1. GMAIL_USER is correct.\n"
+            "2. 2-Step Verification is enabled.\n"
+            "3. GMAIL_APP_PASSWORD is a Google App Password.\n"
+            "4. Do NOT use your normal Gmail password.\n"
+        ) from error
+
+    except Exception as error:
+
+        raise RuntimeError(
+            f"Gmail sending failed: {type(error).__name__}: {error}"
+        ) from error
+
+    print("[EMAIL] =====================================")
+    print("[EMAIL] EMAIL SENT SUCCESSFULLY")
+    print("[EMAIL] =====================================")
 
 
 if __name__ == "__main__":
-    main()
+
+    try:
+        send_email()
+
+    except Exception as error:
+
+        print(
+            f"[EMAIL] ERROR: {error}",
+            file=sys.stderr,
+        )
+
+        sys.exit(1)

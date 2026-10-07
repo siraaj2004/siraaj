@@ -591,304 +591,103 @@ TREND DATA:
 # ============================================================
 
 def extract_json_object(text: str) -> Dict[str, Any]:
-    """
-    Robust JSON extraction.
-
-    Handles:
-    - pure JSON
-    - ```json ... ```
-    - explanatory text before/after JSON
-    - JSON surrounded by accidental whitespace
-    """
-
     if not text or not text.strip():
-        raise RuntimeError("OpenRouter returned empty content.")
+        raise RuntimeError('OpenRouter returned empty content.')
+    text=text.strip()
+    candidates=[text]
+    unfenced=re.sub(r'^```(?:json)?\s*','',text,flags=re.I)
+    unfenced=re.sub(r'\s*```$','',unfenced)
+    if unfenced!=text: candidates.append(unfenced.strip())
+    for source in list(candidates):
+        depth=0; start=None; quoted=False; escaped=False
+        for i,ch in enumerate(source):
+            if quoted:
+                if escaped: escaped=False
+                elif ch=='\\': escaped=True
+                elif ch=='\"': quoted=False
+            else:
+                if ch=='\"': quoted=True
+                elif ch=='{':
+                    if depth==0: start=i
+                    depth+=1
+                elif ch=='}' and depth:
+                    depth-=1
+                    if depth==0 and start is not None:
+                        candidates.append(source[start:i+1]); start=None
+    seen=set()
+    for c in candidates:
+        c=c.strip()
+        if not c or c in seen: continue
+        seen.add(c)
+        for x in (c,re.sub(r',\s*([}\]])',r'\1',c)):
+            try:
+                obj=json.loads(x)
+                if isinstance(obj,dict): return obj
+            except Exception: pass
+    raise RuntimeError('AI returned malformed JSON.')
 
-    cleaned = text.strip()
 
-    # Remove markdown fences if present.
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.I)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
+def _openrouter_text(prompt: str, max_tokens: int=7000) -> str:
+    api_key=require_env('OPENROUTER_API_KEY')
+    headers={'Authorization':f'Bearer {api_key}','Content-Type':'application/json','HTTP-Referer':'https://github.com/','X-Title':'YouTube High CTR Idea Generator'}
+    payload={'model':OPENROUTER_MODEL,'messages':[{'role':'system','content':build_system_prompt()},{'role':'user','content':prompt}],'temperature':0.7,'max_tokens':max_tokens}
+    response=requests.post(OPENROUTER_URL,headers=headers,json=payload,timeout=REQUEST_TIMEOUT)
+    print(f'HTTP status: {response.status_code}')
+    if response.status_code!=200:
+        try: detail=response.json()
+        except Exception: detail=response.text[:1000]
+        raise RuntimeError(f'OpenRouter HTTP {response.status_code}: {detail}')
+    body=response.json(); choices=body.get('choices') or []
+    if not choices: raise RuntimeError('OpenRouter response contains no choices.')
+    msg=choices[0].get('message') or {}; content=msg.get('content')
+    if isinstance(content,list): content=''.join((x.get('text','') if isinstance(x,dict) else str(x)) for x in content)
+    if not isinstance(content,str) or not content.strip(): raise RuntimeError('OpenRouter returned empty content.')
+    print('OpenRouter SUCCESS'); print('Model used:',body.get('model',OPENROUTER_MODEL)); print('AI response length:',len(content),'characters')
+    return content
 
-    # First direct parse.
-    try:
-        obj = json.loads(cleaned)
-        if isinstance(obj, dict):
-            return obj
-    except json.JSONDecodeError:
-        pass
 
-    # Locate first { and last }.
-    start = cleaned.find("{")
-    end = cleaned.rfind("}")
-
-    if start == -1 or end <= start:
-        raise RuntimeError(
-            "AI response does not contain a JSON object."
-        )
-
-    candidate = cleaned[start:end + 1]
-
-    try:
-        obj = json.loads(candidate)
-        if isinstance(obj, dict):
-            return obj
-    except json.JSONDecodeError as exc:
-        # Try a small cleanup for common model mistakes.
-        candidate2 = re.sub(
-            r",\s*([}\]])",
-            r"\1",
-            candidate,
-        )
-
+def _safe_ai(prompt: str, max_tokens: int=7000, attempts: int=2) -> Dict[str,Any]:
+    last=None
+    for attempt in range(1,attempts+1):
         try:
-            obj = json.loads(candidate2)
-            if isinstance(obj, dict):
-                return obj
-        except json.JSONDecodeError:
-            raise RuntimeError(
-                f"AI returned malformed JSON: {exc}"
-            ) from exc
-
-    raise RuntimeError("AI result is not a JSON object.")
+            print(f'OPENROUTER REQUEST | Attempt: {attempt}')
+            return extract_json_object(_openrouter_text(prompt,max_tokens))
+        except Exception as exc:
+            last=exc; print(f'AI attempt {attempt} failed: {type(exc).__name__}: {exc}')
+            if attempt<attempts: time.sleep(2)
+    raise RuntimeError(str(last))
 
 
-def validate_and_normalize_ai_result(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    This is the important fix.
-
-    The old code apparently required:
-        result["ideas"]
-
-    This project actually needs multiple named sections, so this function
-    accepts the correct seven-section structure and also tolerates common
-    alternate AI key names.
-    """
-
-    aliases = {
-        "trend_shorts_ideas": [
-            "trend_shorts_ideas",
-            "trend_based_shorts",
-            "shorts_trend_ideas",
-            "shorts_ideas",
-        ],
-        "trend_longform_ideas": [
-            "trend_longform_ideas",
-            "trend_based_longform",
-            "longform_trend_ideas",
-            "long_form_ideas",
-        ],
-        "general_shorts_ideas": [
-            "general_shorts_ideas",
-            "evergreen_shorts_ideas",
-            "general_short_ideas",
-        ],
-        "general_longform_ideas": [
-            "general_longform_ideas",
-            "evergreen_longform_ideas",
-            "general_long_form_ideas",
-        ],
-    }
-
-    normalized = dict(data)
-
-    # Accept an old generic "ideas" array as a fallback.
-    generic = data.get("ideas")
-    if isinstance(generic, list):
-        normalized.setdefault("trend_shorts_ideas", generic[:IDEAS_PER_SECTION])
-
-    for target, keys in aliases.items():
-        value = None
-        for key in keys:
-            candidate = data.get(key)
-            if isinstance(candidate, list):
-                value = candidate
-                break
-
-        if value is None:
-            value = []
-
-        normalized[target] = value
-
-    normalized.setdefault("india_trends", {
-        "longform_trends": [],
-        "shorts_trends": [],
-    })
-    normalized.setdefault("world_trends", {
-        "longform_trends": [],
-        "shorts_trends": [],
-    })
-    normalized.setdefault("genre_trends", {
-        "longform": [],
-        "shorts": [],
-    })
-
-    # Do not fail just because the model used a slightly different
-    # structure. Fail only if the entire idea generation failed.
-    total_ideas = sum(
-        len(normalized[key])
-        for key in aliases
-    )
-
-    if total_ideas == 0:
-        raise RuntimeError(
-            "AI response was valid JSON, but contained no usable idea lists."
-        )
-
-    # Guarantee top_high_ctr exists.
-    if not isinstance(normalized.get("top_high_ctr"), dict):
-        first = None
-        for key in aliases:
-            if normalized[key]:
-                first = normalized[key][0]
-                break
-
-        if isinstance(first, dict):
-            normalized["top_high_ctr"] = {
-                "title": first.get("title", "Untitled"),
-                "logline_roman_telugu": first.get(
-                    "logline_roman_telugu",
-                    "",
-                ),
-                "why_people_click": first.get(
-                    "why_it_can_work",
-                    first.get("hook", ""),
-                ),
-            }
-        else:
-            normalized["top_high_ctr"] = {}
-
-    return normalized
+def _section_prompt(trend_context: str, section: str, n: int) -> str:
+    descriptions={'trend_shorts_ideas':'India/World trend-based Shorts ideas','trend_longform_ideas':'India/World trend-based 8-10 minute long-form ideas','general_shorts_ideas':'India/World original evergreen Shorts ideas NOT based on current trends','general_longform_ideas':'India/World original evergreen 8-10 minute long-form ideas NOT based on current trends'}
+    return ('Return ONLY valid JSON. No markdown. Create exactly '+str(n)+' exceptionally strong '+descriptions[section]+'. Do not create silly, generic, predictable, generic challenge, generic reaction or boring list ideas. Every idea needs region,title,logline_roman_telugu,hook,why_it_can_work,ctr_score,retention_score,originality_score. Roman Telugu must use English letters and sound natural. JSON shape: {"'+section+'":[{"region":"India or World","title":"","logline_roman_telugu":"","hook":"","why_it_can_work":"","ctr_score":1,"retention_score":1,"originality_score":1}]}\nTREND DATA:\n'+trend_context)
 
 
 def call_openrouter(trend_context: str) -> Dict[str, Any]:
-    api_key = require_env("OPENROUTER_API_KEY")
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/",
-        "X-Title": "YouTube High CTR Idea Generator",
-    }
-
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {
-                "role": "system",
-                "content": build_system_prompt(),
-            },
-            {
-                "role": "user",
-                "content": build_user_prompt(trend_context),
-            },
-        ],
-        "temperature": 0.85,
-        "max_tokens": 16000,
-        "response_format": {
-            "type": "json_object"
-        },
-    }
-
-    last_error = None
-
-    for attempt in range(1, 4):
-        print()
-        print("OPENROUTER REQUEST")
-        print(f"Model: {OPENROUTER_MODEL}")
-        print(f"Attempt: {attempt}")
-
-        try:
-            response = requests.post(
-                OPENROUTER_URL,
-                headers=headers,
-                json=payload,
-                timeout=REQUEST_TIMEOUT,
-            )
-
-            print(f"HTTP status: {response.status_code}")
-
-            if response.status_code != 200:
-                try:
-                    detail = response.json()
-                except Exception:
-                    detail = response.text[:1000]
-
-                last_error = RuntimeError(
-                    f"OpenRouter HTTP {response.status_code}: {detail}"
-                )
-                print(f"AI attempt {attempt} failed: {last_error}")
-                time.sleep(2)
-                continue
-
-            body = response.json()
-
-            choices = body.get("choices") or []
-            if not choices:
-                raise RuntimeError(
-                    "OpenRouter response contains no choices."
-                )
-
-            message = choices[0].get("message") or {}
-            content = message.get("content")
-
-            # Some providers can return structured content.
-            if isinstance(content, list):
-                parts = []
-                for part in content:
-                    if isinstance(part, dict):
-                        if part.get("type") == "text":
-                            parts.append(part.get("text", ""))
-                        elif "text" in part:
-                            parts.append(str(part["text"]))
-                content = "".join(parts)
-
-            if not isinstance(content, str) or not content.strip():
-                raise RuntimeError(
-                    "OpenRouter returned empty content."
-                )
-
-            print("OpenRouter SUCCESS")
-            print(
-                "Model used:",
-                body.get("model", OPENROUTER_MODEL),
-            )
-            print(
-                "AI response length:",
-                len(content),
-                "characters",
-            )
-
-            parsed = extract_json_object(content)
-            result = validate_and_normalize_ai_result(parsed)
-
-            print("AI JSON parsed successfully.")
-            print(
-                "Total usable ideas:",
-                sum(
-                    len(result.get(k, []))
-                    for k in (
-                        "trend_shorts_ideas",
-                        "trend_longform_ideas",
-                        "general_shorts_ideas",
-                        "general_longform_ideas",
-                    )
-                ),
-            )
-
+    n=IDEAS_PER_SECTION
+    compact=('Return ONLY valid JSON. Generate exactly '+str(n)+' ideas for each key: trend_shorts_ideas, trend_longform_ideas, general_shorts_ideas, general_longform_ideas. Longform is 8-10 minutes. Trend ideas use supplied trends; general ideas do not. Every idea needs region,title,logline_roman_telugu,hook,why_it_can_work,ctr_score,retention_score,originality_score. Also return top_high_ctr with title,logline_roman_telugu,why_people_click. Make ideas extremely engaging and original. No silly/generic ideas. Roman Telugu in English letters.\nTREND DATA:\n'+trend_context)
+    try:
+        data=_safe_ai(compact,max_tokens=9000,attempts=2)
+        result=validate_and_normalize_ai_result(data)
+        if sum(len(result.get(k,[])) for k in ('trend_shorts_ideas','trend_longform_ideas','general_shorts_ideas','general_longform_ideas'))>=n*2:
             return result
-
+    except Exception as exc:
+        print(f'Compact report failed: {type(exc).__name__}: {exc}')
+    print('FALLBACK: generating idea sections independently...')
+    result={'top_high_ctr':{},'india_trends':{'longform_trends':[],'shorts_trends':[]},'world_trends':{'longform_trends':[],'shorts_trends':[]},'genre_trends':{'longform':[],'shorts':[]}}
+    all_ideas=[]
+    for section in ('trend_shorts_ideas','trend_longform_ideas','general_shorts_ideas','general_longform_ideas'):
+        result[section]=[]
+        try:
+            data=_safe_ai(_section_prompt(trend_context,section,n),max_tokens=5000,attempts=3)
+            items=data.get(section,[])
+            if isinstance(items,list): result[section]=items; all_ideas.extend(items); print(f'{section}: {len(items)} ideas generated.')
         except Exception as exc:
-            last_error = exc
-            print(f"AI attempt {attempt} failed: {type(exc).__name__}: {exc}")
-
-            if attempt < 3:
-                print("Retrying OpenRouter...")
-                time.sleep(2)
-
-    raise RuntimeError(
-        f"OpenRouter failed after 3 attempts: {last_error}"
-    )
+            print(f'WARNING: {section} failed: {type(exc).__name__}: {exc}')
+    if not all_ideas: raise RuntimeError('OpenRouter could not generate any usable idea sections.')
+    best=max(all_ideas,key=lambda x:(safe_int(x.get('ctr_score')),safe_int(x.get('retention_score')),safe_int(x.get('originality_score'))))
+    result['top_high_ctr']={'title':best.get('title',''),'logline_roman_telugu':best.get('logline_roman_telugu',''),'why_people_click':best.get('why_it_can_work',best.get('hook',''))}
+    return result
 
 
 # ============================================================

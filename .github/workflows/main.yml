@@ -1,239 +1,321 @@
+```yaml
 name: YouTube High CTR Idea Generator
 
 on:
   schedule:
-    # Run every hour
     - cron: "0 * * * *"
 
-  # Allows manual execution from GitHub
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   youtube-idea-generator:
 
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
 
-      # ==========================================
-      # 1. CHECKOUT REPOSITORY
-      # ==========================================
-
+      # ==============================================
+      # 1. CHECKOUT
+      # ==============================================
       - name: Checkout repository
         uses: actions/checkout@v5
 
-
-      # ==========================================
-      # 2. SETUP PYTHON
-      # ==========================================
-
+      # ==============================================
+      # 2. PYTHON
+      # ==============================================
       - name: Setup Python 3.12
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: "pip"
 
-
-      # ==========================================
+      # ==============================================
       # 3. INSTALL DEPENDENCIES
-      # ==========================================
-
+      # ==============================================
       - name: Install dependencies
-        shell: bash
         run: |
-
           set -euo pipefail
-
-          echo "=============================================="
-          echo "INSTALLING DEPENDENCIES"
-          echo "=============================================="
 
           python -m pip install --upgrade pip
 
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
-          else
-            echo "requirements.txt not found."
-            exit 1
           fi
 
-          echo "Dependencies installed successfully."
-
-
-      # ==========================================
-      # 4. CHECK ENVIRONMENT
-      # ==========================================
-
-      - name: Check environment
+      # ==============================================
+      # 4. VERIFY REQUIRED SECRETS
+      # ==============================================
+      - name: Verify environment
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-
-        shell: bash
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-
           set -euo pipefail
 
           echo "=============================================="
-          echo "CHECKING ENVIRONMENT"
+          echo "VERIFYING ENVIRONMENT"
           echo "=============================================="
 
-          if [ -z "$YOUTUBE_API_KEY" ]; then
-            echo "YOUTUBE_API_KEY: MISSING"
+          if [ -z "${YOUTUBE_API_KEY:-}" ]; then
+            echo "ERROR: YOUTUBE_API_KEY is missing"
             exit 1
-          else
-            echo "YOUTUBE_API_KEY: OK"
           fi
+          echo "YOUTUBE_API_KEY: OK"
 
-          if [ -z "$OPENROUTER_API_KEY" ]; then
-            echo "OPENROUTER_API_KEY: MISSING"
+          if [ -z "${RESEND_API_KEY:-}" ]; then
+            echo "ERROR: RESEND_API_KEY is missing"
             exit 1
+          fi
+          echo "RESEND_API_KEY: OK"
+
+          if [ -z "${FROM_EMAIL:-}" ]; then
+            echo "ERROR: FROM_EMAIL is missing"
+            exit 1
+          fi
+          echo "FROM_EMAIL: OK"
+
+          if [ -z "${RECIPIENT_EMAIL:-}" ]; then
+            echo "ERROR: RECIPIENT_EMAIL is missing"
+            exit 1
+          fi
+          echo "RECIPIENT_EMAIL: OK"
+
+          if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+            echo "OPENROUTER_API_KEY: NOT CONFIGURED"
+            echo "Generator can continue using fallback mode."
           else
             echo "OPENROUTER_API_KEY: OK"
           fi
 
-          if [ -z "$RESEND_API_KEY" ]; then
-            echo "RESEND_API_KEY: MISSING"
-            exit 1
-          else
-            echo "RESEND_API_KEY: OK"
-          fi
-
-          if [ -z "$FROM_EMAIL" ]; then
-            echo "FROM_EMAIL: MISSING"
-            exit 1
-          else
-            echo "FROM_EMAIL: OK"
-          fi
-
-          if [ -z "$RECIPIENT_EMAIL" ]; then
-            echo "RECIPIENT_EMAIL: MISSING"
-            exit 1
-          else
-            echo "RECIPIENT_EMAIL: OK"
-          fi
-
-          echo "=============================================="
-          echo "ALL REQUIRED SECRETS ARE PRESENT"
-          echo "=============================================="
-
-
-      # ==========================================
+      # ==============================================
       # 5. RUN GENERATOR
-      # ==========================================
-
+      # ==============================================
       - name: Run YouTube High CTR Idea Generator
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
-          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-
-        shell: bash
         run: |
-
-          set -euxo pipefail
+          set -euo pipefail
 
           echo "=============================================="
           echo "STARTING YOUTUBE HIGH CTR IDEA GENERATOR"
           echo "=============================================="
 
-          echo "Python:"
           python --version
 
-          echo ""
-          echo "Running src/app.py..."
           python src/app.py
 
-          echo ""
           echo "=============================================="
           echo "GENERATOR FINISHED"
           echo "=============================================="
 
-
-      # ==========================================
-      # 6. VERIFY OUTPUT
-      # ==========================================
-
+      # ==============================================
+      # 6. VERIFY REPORT FILES
+      # ==============================================
       - name: Verify generated files
-        shell: bash
         run: |
-
           set -euo pipefail
 
           echo "=============================================="
           echo "VERIFYING GENERATED FILES"
           echo "=============================================="
 
-          if [ ! -f "output/youtube_high_ctr_report.txt" ]; then
-            echo "ERROR: TXT report was not generated."
+          if [ ! -s output/youtube_high_ctr_report.txt ]; then
+            echo "ERROR: TXT report missing or empty"
             exit 1
           fi
 
-          if [ ! -f "output/youtube_high_ctr_report.json" ]; then
-            echo "ERROR: JSON report was not generated."
+          if [ ! -s output/youtube_high_ctr_report.json ]; then
+            echo "ERROR: JSON report missing or empty"
             exit 1
           fi
 
-          echo ""
           echo "TXT report:"
           ls -lh output/youtube_high_ctr_report.txt
 
-          echo ""
           echo "JSON report:"
           ls -lh output/youtube_high_ctr_report.json
 
-          echo ""
           echo "OUTPUT FILES VERIFIED"
 
-
-      # ==========================================
-      # 7. SHOW EMAIL CONFIGURATION
-      # ==========================================
-      # Does NOT print secret values.
-
+      # ==============================================
+      # 7. VERIFY EMAIL CONFIGURATION
+      # ==============================================
       - name: Verify email configuration
         env:
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-
-        shell: bash
         run: |
-
           set -euo pipefail
 
           echo "=============================================="
           echo "VERIFYING EMAIL CONFIGURATION"
           echo "=============================================="
 
+          if [ -z "${FROM_EMAIL:-}" ]; then
+            echo "ERROR: FROM_EMAIL is missing"
+            exit 1
+          fi
+
+          if [ -z "${RECIPIENT_EMAIL:-}" ]; then
+            echo "ERROR: RECIPIENT_EMAIL is missing"
+            exit 1
+          fi
+
           echo "FROM_EMAIL is configured."
           echo "RECIPIENT_EMAIL is configured."
-
           echo "Email configuration looks OK."
 
+      # ==============================================
+      # 8. SEND EMAIL DIRECTLY THROUGH RESEND API
+      # ==============================================
+      - name: Send report using Resend
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
 
-      # ==========================================
-      # 8. UPLOAD GENERATED FILES
-      # ==========================================
+          echo "=============================================="
+          echo "SENDING EMAIL THROUGH RESEND"
+          echo "=============================================="
 
+          python - <<'PY'
+          import os
+          import json
+          import base64
+          import urllib.request
+          import urllib.error
+          from pathlib import Path
+          from datetime import datetime, timezone
+
+          resend_api_key = os.environ["RESEND_API_KEY"]
+          from_email = os.environ["FROM_EMAIL"]
+          recipient_email = os.environ["RECIPIENT_EMAIL"]
+          run_number = os.environ.get("GITHUB_RUN_NUMBER", "unknown")
+
+          txt_file = Path("output/youtube_high_ctr_report.txt")
+          json_file = Path("output/youtube_high_ctr_report.json")
+
+          if not txt_file.exists():
+              raise FileNotFoundError(f"Missing file: {txt_file}")
+
+          if not json_file.exists():
+              raise FileNotFoundError(f"Missing file: {json_file}")
+
+          def encode_file(path):
+              return base64.b64encode(path.read_bytes()).decode("utf-8")
+
+          now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+          payload = {
+              "from": from_email,
+              "to": [recipient_email],
+              "subject": f"YouTube High CTR Report - Run #{run_number}",
+              "text": f"""YouTube High CTR Idea Generator
+
+          Your latest YouTube trend and high-CTR idea report is attached.
+
+          Generated:
+          {now}
+
+          GitHub Actions Run:
+          #{run_number}
+
+          Attachments:
+          - youtube_high_ctr_report.txt
+          - youtube_high_ctr_report.json
+
+          The report was generated automatically by GitHub Actions.
+          """,
+              "attachments": [
+                  {
+                      "filename": "youtube_high_ctr_report.txt",
+                      "content": encode_file(txt_file)
+                  },
+                  {
+                      "filename": "youtube_high_ctr_report.json",
+                      "content": encode_file(json_file)
+                  }
+              ]
+          }
+
+          data = json.dumps(payload).encode("utf-8")
+
+          request = urllib.request.Request(
+              "https://api.resend.com/emails",
+              data=data,
+              method="POST",
+              headers={
+                  "Authorization": f"Bearer {resend_api_key}",
+                  "Content-Type": "application/json",
+                  "User-Agent": "GitHub-Actions-YouTube-Idea-Generator"
+              }
+          )
+
+          try:
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  response_body = response.read().decode("utf-8")
+
+                  print("==============================================")
+                  print("RESEND API RESPONSE")
+                  print("==============================================")
+                  print(response_body)
+
+                  if response.status < 200 or response.status >= 300:
+                      raise RuntimeError(
+                          f"Resend returned HTTP {response.status}"
+                      )
+
+                  result = json.loads(response_body)
+
+                  if not result.get("id"):
+                      raise RuntimeError(
+                          "Resend response did not contain an email ID."
+                      )
+
+                  print("==============================================")
+                  print("EMAIL SENT SUCCESSFULLY")
+                  print("Resend Email ID:", result["id"])
+                  print("==============================================")
+
+          except urllib.error.HTTPError as error:
+              error_body = error.read().decode("utf-8", errors="replace")
+
+              print("==============================================")
+              print("RESEND EMAIL FAILED")
+              print("==============================================")
+              print("HTTP Status:", error.code)
+              print("Response:", error_body)
+
+              raise
+
+          except Exception as error:
+              print("==============================================")
+              print("EMAIL SENDING FAILED")
+              print("==============================================")
+              print(str(error))
+              raise
+          PY
+
+      # ==============================================
+      # 9. UPLOAD REPORTS
+      # ==============================================
       - name: Upload generated files
         if: always()
         uses: actions/upload-artifact@v4
-
         with:
           name: youtube-ideas-${{ github.run_number }}
-
           path: |
             output/
             summaries/
-
           if-no-files-found: ignore
-
           retention-days: 7
+```

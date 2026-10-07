@@ -1,3 +1,4 @@
+```yaml
 name: YouTube High CTR Idea Generator
 
 on:
@@ -23,7 +24,7 @@ jobs:
         uses: actions/checkout@v5
 
       # ==============================================
-      # 2. PYTHON
+      # 2. SETUP PYTHON
       # ==============================================
       - name: Setup Python 3.12
         uses: actions/setup-python@v6
@@ -43,10 +44,13 @@ jobs:
             pip install -r requirements.txt
           fi
 
+          # Required for TXT -> PDF conversion
+          pip install reportlab
+
       # ==============================================
-      # 4. VERIFY REQUIRED SECRETS
+      # 4. CHECK SECRETS
       # ==============================================
-      - name: Verify environment
+      - name: Check environment
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
@@ -57,7 +61,7 @@ jobs:
           set -euo pipefail
 
           echo "=============================================="
-          echo "VERIFYING ENVIRONMENT"
+          echo "CHECKING ENVIRONMENT"
           echo "=============================================="
 
           if [ -z "${YOUTUBE_API_KEY:-}" ]; then
@@ -85,8 +89,8 @@ jobs:
           echo "RECIPIENT_EMAIL: OK"
 
           if [ -z "${OPENROUTER_API_KEY:-}" ]; then
-            echo "OPENROUTER_API_KEY: NOT CONFIGURED"
-            echo "Generator can continue using fallback mode."
+            echo "OPENROUTER_API_KEY: NOT SET"
+            echo "Generator can use fallback mode."
           else
             echo "OPENROUTER_API_KEY: OK"
           fi
@@ -114,7 +118,7 @@ jobs:
           echo "=============================================="
 
       # ==============================================
-      # 6. VERIFY REPORT FILES
+      # 6. VERIFY TXT + JSON
       # ==============================================
       - name: Verify generated files
         run: |
@@ -124,12 +128,12 @@ jobs:
           echo "VERIFYING GENERATED FILES"
           echo "=============================================="
 
-          if [ ! -s output/youtube_high_ctr_report.txt ]; then
+          if [ ! -s "output/youtube_high_ctr_report.txt" ]; then
             echo "ERROR: TXT report missing or empty"
             exit 1
           fi
 
-          if [ ! -s output/youtube_high_ctr_report.json ]; then
+          if [ ! -s "output/youtube_high_ctr_report.json" ]; then
             echo "ERROR: JSON report missing or empty"
             exit 1
           fi
@@ -143,37 +147,290 @@ jobs:
           echo "OUTPUT FILES VERIFIED"
 
       # ==============================================
-      # 7. VERIFY EMAIL CONFIGURATION
+      # 7. CONVERT TXT -> PDF
       # ==============================================
-      - name: Verify email configuration
-        env:
-          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
-          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+      - name: Convert report to PDF
         run: |
           set -euo pipefail
 
           echo "=============================================="
-          echo "VERIFYING EMAIL CONFIGURATION"
+          echo "CREATING PDF REPORT"
           echo "=============================================="
 
-          if [ -z "${FROM_EMAIL:-}" ]; then
-            echo "ERROR: FROM_EMAIL is missing"
+          python - <<'PY'
+          from pathlib import Path
+          from xml.sax.saxutils import escape
+
+          from reportlab.lib.enums import TA_CENTER
+          from reportlab.lib.pagesizes import A4
+          from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+          from reportlab.lib.units import mm
+          from reportlab.platypus import (
+              SimpleDocTemplate,
+              Paragraph,
+              Spacer
+          )
+
+          txt_path = Path(
+              "output/youtube_high_ctr_report.txt"
+          )
+
+          pdf_path = Path(
+              "output/youtube_high_ctr_report.pdf"
+          )
+
+          if not txt_path.exists():
+              raise FileNotFoundError(
+                  f"Report not found: {txt_path}"
+              )
+
+          text = txt_path.read_text(
+              encoding="utf-8",
+              errors="replace"
+          )
+
+          styles = getSampleStyleSheet()
+
+          title_style = ParagraphStyle(
+              "ReportTitle",
+              parent=styles["Title"],
+              fontName="Helvetica-Bold",
+              fontSize=18,
+              leading=22,
+              alignment=TA_CENTER,
+              spaceAfter=12,
+          )
+
+          heading_style = ParagraphStyle(
+              "Heading",
+              parent=styles["Heading2"],
+              fontName="Helvetica-Bold",
+              fontSize=12,
+              leading=15,
+              spaceBefore=10,
+              spaceAfter=6,
+          )
+
+          subheading_style = ParagraphStyle(
+              "SubHeading",
+              parent=styles["Heading3"],
+              fontName="Helvetica-Bold",
+              fontSize=10,
+              leading=13,
+              spaceBefore=7,
+              spaceAfter=4,
+          )
+
+          body_style = ParagraphStyle(
+              "Body",
+              parent=styles["BodyText"],
+              fontName="Helvetica",
+              fontSize=8.5,
+              leading=11,
+              spaceAfter=2,
+              wordWrap="CJK",
+          )
+
+          meta_style = ParagraphStyle(
+              "Meta",
+              parent=body_style,
+              fontName="Helvetica-Bold",
+              fontSize=8.5,
+              leading=11,
+          )
+
+          doc = SimpleDocTemplate(
+              str(pdf_path),
+              pagesize=A4,
+              rightMargin=15 * mm,
+              leftMargin=15 * mm,
+              topMargin=15 * mm,
+              bottomMargin=15 * mm,
+              title="YouTube High CTR Idea Generator Report",
+              author="YouTube High CTR Idea Generator",
+          )
+
+          story = []
+
+          lines = text.splitlines()
+
+          first_non_empty = True
+
+          for line in lines:
+
+              stripped = line.strip()
+
+              # Empty line
+              if not stripped:
+                  story.append(
+                      Spacer(1, 4)
+                  )
+                  continue
+
+              safe = escape(stripped)
+
+              # Main title
+              if first_non_empty:
+                  story.append(
+                      Paragraph(
+                          safe,
+                          title_style
+                      )
+                  )
+                  first_non_empty = False
+                  continue
+
+              # Major section headings
+              major_sections = (
+                  "TOP HIGH CTR IDEA",
+                  "1. INDIA YOUTUBE TRENDS",
+                  "2. WORLD YOUTUBE TRENDS",
+                  "3. YOUTUBE GENRE TRENDS",
+                  "4. INDIA/WORLD TREND-BASED SHORTS IDEAS",
+                  "5. INDIA/WORLD TREND-BASED LONG-FORM IDEAS",
+                  "6. INDIA/WORLD GENERAL SHORTS IDEAS",
+                  "7. INDIA/WORLD GENERAL LONG-FORM IDEAS",
+                  "8. GENRE-COMBO HIGH CTR IDEAS",
+                  "CREATIVE STANDARD",
+              )
+
+              if stripped in major_sections:
+                  story.append(
+                      Spacer(1, 7)
+                  )
+                  story.append(
+                      Paragraph(
+                          safe,
+                          heading_style
+                      )
+                  )
+                  continue
+
+              # Underlined separator lines
+              if set(stripped) <= {"=", "-"}:
+                  continue
+
+              # Secondary headings
+              if (
+                  stripped.startswith("INDIA LONG-FORM TRENDS")
+                  or stripped.startswith("INDIA SHORTS TRENDS")
+                  or stripped.startswith("WORLD LONG-FORM TRENDS")
+                  or stripped.startswith("WORLD SHORTS TRENDS")
+                  or stripped.startswith("LONG-FORM GENRE TRENDS")
+                  or stripped.startswith("SHORTS GENRE TRENDS")
+              ):
+                  story.append(
+                      Paragraph(
+                          safe,
+                          subheading_style
+                      )
+                  )
+                  continue
+
+              # Numbered idea/trend rows
+              if (
+                  len(stripped) > 2
+                  and stripped[0].isdigit()
+                  and ". " in stripped[:5]
+              ):
+                  story.append(
+                      Paragraph(
+                          safe,
+                          subheading_style
+                      )
+                  )
+                  continue
+
+              # Important metadata lines
+              if (
+                  stripped.startswith("Region:")
+                  or stripped.startswith("Format:")
+                  or stripped.startswith("Genre:")
+                  or stripped.startswith("Sub-genre:")
+                  or stripped.startswith("Scores:")
+              ):
+                  story.append(
+                      Paragraph(
+                          safe,
+                          meta_style
+                      )
+                  )
+                  continue
+
+              # Normal content
+              story.append(
+                  Paragraph(
+                      safe,
+                      body_style
+                  )
+              )
+
+          def add_page_number(canvas, document):
+              canvas.saveState()
+
+              canvas.setFont(
+                  "Helvetica",
+                  7
+              )
+
+              canvas.drawCentredString(
+                  A4[0] / 2,
+                  8 * mm,
+                  f"Page {document.page}"
+              )
+
+              canvas.restoreState()
+
+          doc.build(
+              story,
+              onFirstPage=add_page_number,
+              onLaterPages=add_page_number
+          )
+
+          print(
+              "PDF created:",
+              pdf_path
+          )
+
+          print(
+              "PDF size:",
+              pdf_path.stat().st_size,
+              "bytes"
+          )
+          PY
+
+          echo "=============================================="
+          echo "PDF CREATED"
+          echo "=============================================="
+
+          ls -lh output/youtube_high_ctr_report.pdf
+
+      # ==============================================
+      # 8. VERIFY PDF
+      # ==============================================
+      - name: Verify PDF
+        run: |
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "VERIFYING PDF"
+          echo "=============================================="
+
+          if [ ! -s "output/youtube_high_ctr_report.pdf" ]; then
+            echo "ERROR: PDF missing or empty"
             exit 1
           fi
 
-          if [ -z "${RECIPIENT_EMAIL:-}" ]; then
-            echo "ERROR: RECIPIENT_EMAIL is missing"
-            exit 1
-          fi
+          file output/youtube_high_ctr_report.pdf
 
-          echo "FROM_EMAIL is configured."
-          echo "RECIPIENT_EMAIL is configured."
-          echo "Email configuration looks OK."
+          ls -lh output/youtube_high_ctr_report.pdf
+
+          echo "PDF VERIFIED"
 
       # ==============================================
-      # 8. SEND EMAIL DIRECTLY THROUGH RESEND API
+      # 9. SEND PDF EMAIL USING RESEND
       # ==============================================
-      - name: Send report using Resend
+      - name: Send PDF report using Resend
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
@@ -183,7 +440,7 @@ jobs:
           set -euo pipefail
 
           echo "=============================================="
-          echo "SENDING EMAIL THROUGH RESEND"
+          echo "SENDING PDF EMAIL THROUGH RESEND"
           echo "=============================================="
 
           python - <<'PY'
@@ -195,117 +452,220 @@ jobs:
           from pathlib import Path
           from datetime import datetime, timezone
 
-          resend_api_key = os.environ["RESEND_API_KEY"]
-          from_email = os.environ["FROM_EMAIL"]
-          recipient_email = os.environ["RECIPIENT_EMAIL"]
-          run_number = os.environ.get("GITHUB_RUN_NUMBER", "unknown")
+          API_KEY = os.environ["RESEND_API_KEY"]
+          FROM_EMAIL = os.environ["FROM_EMAIL"]
+          RECIPIENT_EMAIL = os.environ["RECIPIENT_EMAIL"]
+          RUN_NUMBER = os.environ["GITHUB_RUN_NUMBER"]
 
-          txt_file = Path("output/youtube_high_ctr_report.txt")
-          json_file = Path("output/youtube_high_ctr_report.json")
+          PDF_FILE = Path(
+              "output/youtube_high_ctr_report.pdf"
+          )
 
-          if not txt_file.exists():
-              raise FileNotFoundError(f"Missing file: {txt_file}")
+          JSON_FILE = Path(
+              "output/youtube_high_ctr_report.json"
+          )
 
-          if not json_file.exists():
-              raise FileNotFoundError(f"Missing file: {json_file}")
+          # ------------------------------------------
+          # Verify PDF
+          # ------------------------------------------
+
+          if not PDF_FILE.is_file():
+              raise FileNotFoundError(
+                  f"PDF not found: {PDF_FILE}"
+              )
+
+          if PDF_FILE.stat().st_size == 0:
+              raise RuntimeError(
+                  "PDF file is empty."
+              )
+
+          # ------------------------------------------
+          # Encode attachment
+          # ------------------------------------------
 
           def encode_file(path):
-              return base64.b64encode(path.read_bytes()).decode("utf-8")
+              return base64.b64encode(
+                  path.read_bytes()
+              ).decode("utf-8")
 
-          now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+          pdf_content = encode_file(
+              PDF_FILE
+          )
+
+          json_content = encode_file(
+              JSON_FILE
+          )
+
+          generated_time = datetime.now(
+              timezone.utc
+          ).strftime(
+              "%Y-%m-%d %H:%M UTC"
+          )
+
+          # ------------------------------------------
+          # Resend payload
+          # ------------------------------------------
 
           payload = {
-              "from": from_email,
-              "to": [recipient_email],
-              "subject": f"YouTube High CTR Report - Run #{run_number}",
-              "text": f"""YouTube High CTR Idea Generator
+              "from": FROM_EMAIL,
 
-          Your latest YouTube trend and high-CTR idea report is attached.
+              "to": [
+                  RECIPIENT_EMAIL
+              ],
 
-          Generated:
-          {now}
+              "subject": (
+                  "YouTube High CTR Idea Report "
+                  f"- Run #{RUN_NUMBER}"
+              ),
 
-          GitHub Actions Run:
-          #{run_number}
+              "text": (
+                  "YouTube High CTR Idea Generator\n\n"
+                  "Your latest YouTube trend and "
+                  "high-CTR idea report is attached "
+                  "as a PDF.\n\n"
+                  f"Generated: {generated_time}\n"
+                  f"GitHub Actions Run: #{RUN_NUMBER}\n\n"
+                  "Attachments:\n"
+                  "- youtube_high_ctr_report.pdf\n"
+                  "- youtube_high_ctr_report.json\n"
+              ),
 
-          Attachments:
-          - youtube_high_ctr_report.txt
-          - youtube_high_ctr_report.json
-
-          The report was generated automatically by GitHub Actions.
-          """,
               "attachments": [
                   {
-                      "filename": "youtube_high_ctr_report.txt",
-                      "content": encode_file(txt_file)
+                      "filename": (
+                          "youtube_high_ctr_report.pdf"
+                      ),
+                      "content": pdf_content
                   },
                   {
-                      "filename": "youtube_high_ctr_report.json",
-                      "content": encode_file(json_file)
+                      "filename": (
+                          "youtube_high_ctr_report.json"
+                      ),
+                      "content": json_content
                   }
               ]
           }
 
-          data = json.dumps(payload).encode("utf-8")
+          data = json.dumps(
+              payload
+          ).encode("utf-8")
 
           request = urllib.request.Request(
               "https://api.resend.com/emails",
               data=data,
               method="POST",
               headers={
-                  "Authorization": f"Bearer {resend_api_key}",
-                  "Content-Type": "application/json",
-                  "User-Agent": "GitHub-Actions-YouTube-Idea-Generator"
+                  "Authorization": (
+                      f"Bearer {API_KEY}"
+                  ),
+                  "Content-Type": (
+                      "application/json"
+                  ),
+                  "User-Agent": (
+                      "GitHub-Actions-"
+                      "YouTube-Idea-Generator"
+                  )
               }
           )
 
           try:
-              with urllib.request.urlopen(request, timeout=60) as response:
-                  response_body = response.read().decode("utf-8")
 
-                  print("==============================================")
-                  print("RESEND API RESPONSE")
-                  print("==============================================")
-                  print(response_body)
+              with urllib.request.urlopen(
+                  request,
+                  timeout=60
+              ) as response:
 
-                  if response.status < 200 or response.status >= 300:
+                  response_text = (
+                      response
+                      .read()
+                      .decode("utf-8")
+                  )
+
+                  print(
+                      "=============================================="
+                  )
+                  print("RESEND RESPONSE")
+                  print(
+                      "=============================================="
+                  )
+
+                  print(response_text)
+
+                  result = json.loads(
+                      response_text
+                  )
+
+                  email_id = result.get("id")
+
+                  if not email_id:
                       raise RuntimeError(
-                          f"Resend returned HTTP {response.status}"
+                          "Resend did not return an email ID."
                       )
 
-                  result = json.loads(response_body)
-
-                  if not result.get("id"):
-                      raise RuntimeError(
-                          "Resend response did not contain an email ID."
-                      )
-
-                  print("==============================================")
-                  print("EMAIL SENT SUCCESSFULLY")
-                  print("Resend Email ID:", result["id"])
-                  print("==============================================")
+                  print(
+                      "=============================================="
+                  )
+                  print(
+                      "PDF EMAIL SENT SUCCESSFULLY"
+                  )
+                  print(
+                      "Resend Email ID:",
+                      email_id
+                  )
+                  print(
+                      "=============================================="
+                  )
 
           except urllib.error.HTTPError as error:
-              error_body = error.read().decode("utf-8", errors="replace")
 
-              print("==============================================")
+              error_body = (
+                  error
+                  .read()
+                  .decode(
+                      "utf-8",
+                      errors="replace"
+                  )
+              )
+
+              print(
+                  "=============================================="
+              )
               print("RESEND EMAIL FAILED")
-              print("==============================================")
-              print("HTTP Status:", error.code)
-              print("Response:", error_body)
+              print(
+                  "=============================================="
+              )
+
+              print(
+                  "HTTP STATUS:",
+                  error.code
+              )
+
+              print(
+                  "RESPONSE:",
+                  error_body
+              )
 
               raise
 
           except Exception as error:
-              print("==============================================")
+
+              print(
+                  "=============================================="
+              )
               print("EMAIL SENDING FAILED")
-              print("==============================================")
-              print(str(error))
+              print(
+                  "=============================================="
+              )
+
+              print(
+                  "ERROR:",
+                  str(error)
+              )
+
               raise
-          PY
 
       # ==============================================
-      # 9. UPLOAD REPORTS
+      # 10. UPLOAD ALL OUTPUT FILES
       # ==============================================
       - name: Upload generated files
         if: always()
@@ -317,3 +677,4 @@ jobs:
             summaries/
           if-no-files-found: ignore
           retention-days: 7
+```

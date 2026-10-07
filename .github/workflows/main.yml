@@ -2,10 +2,10 @@ name: YouTube High CTR Idea Generator
 
 on:
   schedule:
-    # Run every hour, 24 hours a day
+    # Run every hour
     - cron: "0 * * * *"
 
-  # Allows you to manually run the workflow from GitHub
+  # Allows manual execution from GitHub
   workflow_dispatch:
 
 permissions:
@@ -14,38 +14,59 @@ permissions:
 jobs:
   youtube-idea-generator:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
 
       # ==========================================
-      # 1. Checkout repository
+      # 1. CHECKOUT REPOSITORY
       # ==========================================
+
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
 
       # ==========================================
-      # 2. Setup Python
+      # 2. SETUP PYTHON
       # ==========================================
+
       - name: Setup Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: "pip"
+
 
       # ==========================================
-      # 3. Install dependencies
+      # 3. INSTALL DEPENDENCIES
       # ==========================================
+
       - name: Install dependencies
+        shell: bash
         run: |
+
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "INSTALLING DEPENDENCIES"
+          echo "=============================================="
+
           python -m pip install --upgrade pip
 
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
+          else
+            echo "requirements.txt not found."
+            exit 1
           fi
 
+          echo "Dependencies installed successfully."
+
+
       # ==========================================
-      # 4. Check environment
+      # 4. CHECK ENVIRONMENT
       # ==========================================
+
       - name: Check environment
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
@@ -53,7 +74,12 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+
+        shell: bash
         run: |
+
+          set -euo pipefail
+
           echo "=============================================="
           echo "CHECKING ENVIRONMENT"
           echo "=============================================="
@@ -93,9 +119,15 @@ jobs:
             echo "RECIPIENT_EMAIL: OK"
           fi
 
+          echo "=============================================="
+          echo "ALL REQUIRED SECRETS ARE PRESENT"
+          echo "=============================================="
+
+
       # ==========================================
-      # 5. Run generator
+      # 5. RUN GENERATOR
       # ==========================================
+
       - name: Run YouTube High CTR Idea Generator
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
@@ -103,7 +135,10 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+
+        shell: bash
         run: |
+
           set -euxo pipefail
 
           echo "=============================================="
@@ -113,23 +148,92 @@ jobs:
           echo "Python:"
           python --version
 
-          echo "Running src/app.py"
+          echo ""
+          echo "Running src/app.py..."
           python src/app.py
 
+          echo ""
           echo "=============================================="
           echo "GENERATOR FINISHED"
           echo "=============================================="
 
+
       # ==========================================
-      # 6. Upload generated files
+      # 6. VERIFY OUTPUT
       # ==========================================
+
+      - name: Verify generated files
+        shell: bash
+        run: |
+
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "VERIFYING GENERATED FILES"
+          echo "=============================================="
+
+          if [ ! -f "output/youtube_high_ctr_report.txt" ]; then
+            echo "ERROR: TXT report was not generated."
+            exit 1
+          fi
+
+          if [ ! -f "output/youtube_high_ctr_report.json" ]; then
+            echo "ERROR: JSON report was not generated."
+            exit 1
+          fi
+
+          echo ""
+          echo "TXT report:"
+          ls -lh output/youtube_high_ctr_report.txt
+
+          echo ""
+          echo "JSON report:"
+          ls -lh output/youtube_high_ctr_report.json
+
+          echo ""
+          echo "OUTPUT FILES VERIFIED"
+
+
+      # ==========================================
+      # 7. SHOW EMAIL CONFIGURATION
+      # ==========================================
+      # Does NOT print secret values.
+
+      - name: Verify email configuration
+        env:
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+
+        shell: bash
+        run: |
+
+          set -euo pipefail
+
+          echo "=============================================="
+          echo "VERIFYING EMAIL CONFIGURATION"
+          echo "=============================================="
+
+          echo "FROM_EMAIL is configured."
+          echo "RECIPIENT_EMAIL is configured."
+
+          echo "Email configuration looks OK."
+
+
+      # ==========================================
+      # 8. UPLOAD GENERATED FILES
+      # ==========================================
+
       - name: Upload generated files
         if: always()
         uses: actions/upload-artifact@v4
+
         with:
           name: youtube-ideas-${{ github.run_number }}
+
           path: |
             output/
             summaries/
+
           if-no-files-found: ignore
+
           retention-days: 7

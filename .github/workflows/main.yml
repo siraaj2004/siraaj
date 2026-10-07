@@ -1,4 +1,3 @@
-```yaml
 name: YouTube High CTR Idea Generator
 
 on:
@@ -676,5 +675,4 @@ jobs:
             output/
             summaries/
           if-no-files-found: ignore
-          retention-days: 7
-```
+

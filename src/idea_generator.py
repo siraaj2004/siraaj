@@ -1,3450 +1,800 @@
-````python
-"""
-===============================================================
-YOUTUBE HIGH CTR IDEA GENERATOR
-===============================================================
+from __future__ import annotations
 
-OUTPUT STRUCTURE
-
-TOP:
-    HIGH CTR IDEA
-    Roman Telugu logline
-
-1. India YouTube Trends
-    - Shorts
-    - Long-form 8–10 minutes
-    - Actual videos
-
-2. World YouTube Trends
-    - Shorts
-    - Long-form 8–10 minutes
-    - Actual videos
-
-3. YouTube Genre Trends
-    - Shorts
-    - Long-form 8–10 minutes
-    - Genre -> Subgenre
-    - Actual videos
-
-4. Trend-Based Shorts Ideas
-    - India + World
-    - Very engaging
-    - Roman Telugu logline
-
-5. Trend-Based Long-form Ideas
-    - India + World
-    - 8–10 minutes
-    - Very engaging
-    - Roman Telugu logline
-
-6. General Shorts Ideas
-    - NOT based on current trends
-    - Very engaging
-    - Roman Telugu logline
-
-7. General Long-form Ideas
-    - NOT based on current trends
-    - 8–10 minutes
-    - Very engaging
-    - Roman Telugu logline
-
-8. Genre Combination Ideas
-    - Based on genre trends
-    - High CTR
-    - Very engaging
-    - Roman Telugu logline
-
-IMPORTANT:
-    - No silly ideas
-    - No generic reaction ideas
-    - No lazy challenges
-    - No fake clickbait
-    - No copying source video titles
-    - Actual source video titles are displayed
-    - OpenRouter is attempted ONLY ONCE
-    - Any OpenRouter failure -> local fallback
-===============================================================
-"""
-
+import json
+import math
 import os
 import re
-import json
-from pathlib import Path
+import statistics
+import time
+from collections import Counter, defaultdict
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
 from dotenv import load_dotenv
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import (
-    getSampleStyleSheet,
-    ParagraphStyle,
-)
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.units import mm
-from reportlab.platypus import (
-    SimpleDocTemplate,
-    Paragraph,
-    Spacer,
-)
-
-# ============================================================
-# ENVIRONMENT
-# ============================================================
 
 load_dotenv()
 
-YOUTUBE_API_KEY = os.getenv(
-    "YOUTUBE_API_KEY",
-    ""
-).strip()
-
-OPENROUTER_API_KEY = os.getenv(
-    "OPENROUTER_API_KEY",
-    ""
-).strip()
-
-OPENROUTER_MODEL = os.getenv(
-    "OPENROUTER_MODEL",
-    "z-ai/glm-5.3-flash"
-).strip()
-
-OUTPUT_DIR = Path(
-    os.getenv(
-        "OUTPUT_DIR",
-        "output"
-    )
-)
-
-OUTPUT_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-# India
-INDIA_CODE = "IN"
-
-# World sample regions.
-# You can change these from GitHub Secrets / .env.
-WORLD_COUNTRIES = [
-    x.strip().upper()
-    for x in os.getenv(
-        "WORLD_COUNTRIES",
-        "US,GB,CA,AU,DE,FR,JP,KR,BR,MX"
-    ).split(",")
-    if x.strip()
-]
-
-YOUTUBE_API_URL = (
-    "https://www.googleapis.com/youtube/v3/videos"
-)
-
-OPENROUTER_URL = (
-    "https://openrouter.ai/api/v1/chat/completions"
-)
 
 # ============================================================
-# VIDEO FORMAT
+# CONFIG
 # ============================================================
 
-SHORT_MAX_SECONDS = 180
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "z-ai/glm-5.3-flash").strip()
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "output"))
+WORLD_COUNTRIES = [x.strip().upper() for x in os.getenv(
+    "WORLD_COUNTRIES", "US,GB,CA,AU,DE,FR,JP,KR,BR,MX"
+).split(",") if x.strip()]
 
-LONGFORM_MIN_SECONDS = 8 * 60
-LONGFORM_MAX_SECONDS = 10 * 60
+YOUTUBE_BASE = "https://www.googleapis.com/youtube/v3"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+TIMEOUT = 30
+MAX_VIDEOS_PER_REGION = 50
+MAX_TREND_VIDEOS_IN_REPORT = 10
 
-SOURCE_VIDEO_LIMIT = 10
-IDEAS_PER_SECTION = 8
-
-# ============================================================
-# GENRE SYSTEM
-# ============================================================
-
-GENRE_KEYWORDS = {
-
-    "Entertainment": [
-        "movie",
-        "film",
-        "cinema",
-        "trailer",
-        "actor",
-        "actress",
-        "celebrity",
-        "entertainment",
-        "reaction",
-        "comedy",
-        "thriller",
-        "series",
-        "web series",
-    ],
-
-    "Music": [
-        "song",
-        "music",
-        "lyrics",
-        "singer",
-        "concert",
-        "album",
-        "cover",
-        "audio",
-        "music video",
-    ],
-
-    "Gaming": [
-        "gaming",
-        "gameplay",
-        "minecraft",
-        "gta",
-        "roblox",
-        "free fire",
-        "pubg",
-        "bgmi",
-        "valorant",
-        "fortnite",
-    ],
-
-    "Technology": [
-        "technology",
-        "tech",
-        "iphone",
-        "android",
-        "ai",
-        "artificial intelligence",
-        "robot",
-        "coding",
-        "python",
-        "software",
-        "google",
-        "apple",
-    ],
-
-    "Education": [
-        "education",
-        "learn",
-        "tutorial",
-        "course",
-        "exam",
-        "study",
-        "science",
-        "math",
-        "history",
-        "explained",
-    ],
-
-    "News & Current Affairs": [
-        "news",
-        "breaking",
-        "politics",
-        "election",
-        "government",
-        "minister",
-        "current affairs",
-    ],
-
-    "Lifestyle": [
-        "vlog",
-        "lifestyle",
-        "travel",
-        "food",
-        "restaurant",
-        "cooking",
-        "fitness",
-        "gym",
-        "fashion",
-        "beauty",
-    ],
-
-    "Sports": [
-        "cricket",
-        "football",
-        "soccer",
-        "basketball",
-        "tennis",
-        "match",
-        "ipl",
-        "wwe",
-        "sports",
-    ],
-
-    "Business & Finance": [
-        "business",
-        "finance",
-        "money",
-        "investment",
-        "stock",
-        "startup",
-        "entrepreneur",
-        "economy",
-    ],
-
-    "True Crime & Mystery": [
-        "crime",
-        "murder",
-        "killer",
-        "case",
-        "investigation",
-        "missing",
-        "mystery",
-        "scam",
-        "fraud",
-    ],
+# YouTube category IDs commonly used by the API.
+CATEGORY_NAMES = {
+    "1": "Film & Animation",
+    "2": "Autos & Vehicles",
+    "10": "Music",
+    "15": "Pets & Animals",
+    "17": "Sports",
+    "19": "Travel & Events",
+    "20": "Gaming",
+    "22": "People & Blogs",
+    "23": "Comedy",
+    "24": "Entertainment",
+    "25": "News & Politics",
+    "26": "Howto & Style",
+    "27": "Education",
+    "28": "Science & Technology",
+    "29": "Nonprofits & Activism",
 }
 
 
-SUBGENRE_KEYWORDS = {
+# ============================================================
+# DATA MODEL
+# ============================================================
 
-    "Thriller": [
-        "thriller",
-        "suspense",
-        "chase",
-        "escape",
-        "danger",
-        "survival",
-    ],
+@dataclass
+class Video:
+    video_id: str
+    title: str
+    channel: str
+    channel_id: str
+    views: int
+    likes: int
+    comments: int
+    duration_seconds: int
+    published_at: str
+    category_id: str
+    category: str
+    region: str
+    url: str
 
-    "Mystery": [
-        "mystery",
-        "unknown",
-        "secret",
-        "missing",
-        "disappearance",
-        "unsolved",
-        "clue",
-    ],
+    @property
+    def is_short(self) -> bool:
+        return 0 < self.duration_seconds <= 180
 
-    "Crime": [
-        "crime",
-        "murder",
-        "killer",
-        "criminal",
-        "police",
-        "case",
-        "scam",
-        "fraud",
-    ],
+    @property
+    def is_long_8_10(self) -> bool:
+        return 480 <= self.duration_seconds <= 600
 
-    "Comedy": [
-        "comedy",
-        "funny",
-        "laugh",
-        "roast",
-        "parody",
-        "meme",
-    ],
+    @property
+    def format_name(self) -> str:
+        if self.is_short:
+            return "Shorts"
+        if self.is_long_8_10:
+            return "Long-form (8–10 min)"
+        return "Other long-form"
 
-    "Reaction": [
-        "reaction",
-        "react",
-        "reacting",
-        "review",
-    ],
+    @property
+    def duration_text(self) -> str:
+        s = self.duration_seconds
+        if s < 60:
+            return f"{s}s"
+        return f"{s // 60}:{s % 60:02d}"
 
-    "Storytelling": [
-        "story",
-        "storytime",
-        "journey",
-        "experience",
-        "life story",
-    ],
-
-    "Documentary": [
-        "documentary",
-        "investigation",
-        "explained",
-        "history",
-        "untold",
-    ],
-
-    "Technology": [
-        "ai",
-        "iphone",
-        "android",
-        "robot",
-        "coding",
-        "python",
-        "tech",
-    ],
-
-    "Gaming": [
-        "gaming",
-        "gameplay",
-        "minecraft",
-        "gta",
-        "roblox",
-        "valorant",
-        "pubg",
-        "bgmi",
-    ],
-
-    "Food": [
-        "food",
-        "restaurant",
-        "cooking",
-        "recipe",
-        "street food",
-    ],
-
-    "Travel": [
-        "travel",
-        "trip",
-        "airport",
-        "flight",
-        "hotel",
-        "tour",
-    ],
-
-    "Fitness": [
-        "gym",
-        "workout",
-        "fitness",
-        "muscle",
-        "weight loss",
-    ],
-
-    "Music": [
-        "song",
-        "music",
-        "concert",
-        "lyrics",
-        "cover",
-    ],
-
-    "Sports": [
-        "cricket",
-        "football",
-        "soccer",
-        "basketball",
-        "match",
-        "wwe",
-    ],
-}
+    @property
+    def views_text(self) -> str:
+        return compact_number(self.views)
 
 
 # ============================================================
 # BASIC HELPERS
 # ============================================================
 
-def clean_text(value: Any) -> str:
-
-    if value is None:
-        return ""
-
-    text = str(value)
-
-    text = re.sub(
-        r"\s+",
-        " ",
-        text
-    )
-
-    return text.strip()
+def compact_number(n: int | float) -> str:
+    n = float(n)
+    if n >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.1f}B"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(int(n))
 
 
-def safe_int(
-    value: Any,
-    default: int = 0
-) -> int:
+def clean_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "")).strip()
 
+
+def parse_iso_duration(value: str) -> int:
+    m = re.fullmatch(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", value or "")
+    if not m:
+        return 0
+    h, mi, s = (int(x or 0) for x in m.groups())
+    return h * 3600 + mi * 60 + s
+
+
+def safe_int(value: Any) -> int:
     try:
-        return int(value)
+        return int(value or 0)
     except Exception:
-        return default
-
-
-def format_views(
-    views: int
-) -> str:
-
-    if views >= 1_000_000_000:
-        return f"{views / 1_000_000_000:.1f}B"
-
-    if views >= 1_000_000:
-        return f"{views / 1_000_000:.1f}M"
-
-    if views >= 1_000:
-        return f"{views / 1_000:.1f}K"
-
-    return str(views)
-
-
-def parse_duration(
-    duration: str
-) -> int:
-
-    if not duration:
         return 0
 
-    h = re.search(
-        r"(\d+)H",
-        duration
-    )
 
-    m = re.search(
-        r"(\d+)M",
-        duration
-    )
-
-    s = re.search(
-        r"(\d+)S",
-        duration
-    )
-
-    hours = (
-        int(h.group(1))
-        if h
-        else 0
-    )
-
-    minutes = (
-        int(m.group(1))
-        if m
-        else 0
-    )
-
-    seconds = (
-        int(s.group(1))
-        if s
-        else 0
-    )
-
-    return (
-        hours * 3600
-        + minutes * 60
-        + seconds
-    )
+def parse_dt(value: str) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
-def format_duration(
-    seconds: int
-) -> str:
-
-    minutes = seconds // 60
-    remaining = seconds % 60
-
-    if minutes >= 60:
-
-        hours = minutes // 60
-        minutes = minutes % 60
-
-        return (
-            f"{hours}:"
-            f"{minutes:02d}:"
-            f"{remaining:02d}"
-        )
-
-    return (
-        f"{minutes}:"
-        f"{remaining:02d}"
-    )
+def age_days(published_at: str) -> float:
+    dt = parse_dt(published_at)
+    if not dt:
+        return 30.0
+    return max(0.25, (datetime.now(timezone.utc) - dt).total_seconds() / 86400)
 
 
-# ============================================================
-# FORMAT
-# ============================================================
-
-def classify_format(
-    seconds: int
-) -> str:
-
-    if seconds <= 0:
-        return "Unknown"
-
-    if seconds <= SHORT_MAX_SECONDS:
-        return "Shorts"
-
-    if (
-        LONGFORM_MIN_SECONDS
-        <= seconds
-        <= LONGFORM_MAX_SECONDS
-    ):
-        return "Long-form 8–10 min"
-
-    return "Other Long-form"
+def title_words(title: str) -> List[str]:
+    words = re.findall(r"[A-Za-z0-9']+", title.lower())
+    stop = {
+        "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with",
+        "is", "this", "that", "from", "by", "at", "it", "my", "your", "you",
+        "i", "we", "our", "me", "vs", "part", "full", "official", "video",
+        "shorts", "short", "new", "latest", "live", "hd", "4k", "episode",
+    }
+    return [w for w in words if len(w) > 2 and w not in stop and not w.isdigit()]
 
 
-# ============================================================
-# GENRE
-# ============================================================
-
-def classify_genre(
-    title: str
-) -> str:
-
-    text = clean_text(
-        title
-    ).lower()
-
-    scores = {}
-
-    for genre, keywords in GENRE_KEYWORDS.items():
-
-        score = 0
-
-        for keyword in keywords:
-
-            if keyword in text:
-                score += 1
-
-        scores[genre] = score
-
-    best = max(
-        scores,
-        key=scores.get
-    )
-
-    if scores[best] == 0:
-        return "Entertainment"
-
-    return best
+def safe_mean(values: Iterable[float]) -> float:
+    vals = list(values)
+    return statistics.mean(vals) if vals else 0.0
 
 
-def classify_subgenre(
-    title: str
-) -> str:
-
-    text = clean_text(
-        title
-    ).lower()
-
-    scores = {}
-
-    for subgenre, keywords in SUBGENRE_KEYWORDS.items():
-
-        score = 0
-
-        for keyword in keywords:
-
-            if keyword in text:
-                score += 1
-
-        scores[subgenre] = score
-
-    best = max(
-        scores,
-        key=scores.get
-    )
-
-    if scores[best] == 0:
-        return "General"
-
-    return best
+def dedupe_videos(videos: List[Video]) -> List[Video]:
+    seen = set()
+    out = []
+    for v in videos:
+        if v.video_id in seen:
+            continue
+        seen.add(v.video_id)
+        out.append(v)
+    return out
 
 
 # ============================================================
 # YOUTUBE API
 # ============================================================
 
-def fetch_country_videos(
-    country_code: str
-) -> List[Dict[str, Any]]:
-
+def youtube_get(endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
     if not YOUTUBE_API_KEY:
+        raise RuntimeError("YOUTUBE_API_KEY is missing")
+    p = dict(params)
+    p["key"] = YOUTUBE_API_KEY
+    r = requests.get(f"{YOUTUBE_BASE}/{endpoint}", params=p, timeout=TIMEOUT)
+    if r.status_code != 200:
+        raise RuntimeError(f"YouTube API {r.status_code}: {r.text[:500]}")
+    return r.json()
 
-        raise RuntimeError(
-            "YOUTUBE_API_KEY is missing."
-        )
 
-    params = {
-        "part": (
-            "snippet,"
-            "statistics,"
-            "contentDetails"
-        ),
-        "chart": "mostPopular",
-        "regionCode": country_code,
-        "maxResults": 50,
-        "key": YOUTUBE_API_KEY,
-    }
-
-    response = requests.get(
-        YOUTUBE_API_URL,
-        params=params,
-        timeout=40,
+def fetch_region(region: str, max_results: int = MAX_VIDEOS_PER_REGION) -> List[Video]:
+    data = youtube_get(
+        "videos",
+        {
+            "part": "snippet,statistics,contentDetails",
+            "chart": "mostPopular",
+            "regionCode": region,
+            "maxResults": max_results,
+        },
     )
-
-    response.raise_for_status()
-
-    data = response.json()
-
-    videos = []
-
-    for item in data.get(
-        "items",
-        []
-    ):
-
-        video_id = item.get(
-            "id"
-        )
-
-        snippet = item.get(
-            "snippet",
-            {}
-        )
-
-        statistics = item.get(
-            "statistics",
-            {}
-        )
-
-        content = item.get(
-            "contentDetails",
-            {}
-        )
-
-        if not video_id:
+    out: List[Video] = []
+    for item in data.get("items", []):
+        snippet = item.get("snippet", {})
+        stats = item.get("statistics", {})
+        details = item.get("contentDetails", {})
+        vid = item.get("id", "")
+        if not vid:
             continue
-
-        title = clean_text(
-            snippet.get(
-                "title"
-            )
-        )
-
-        if not title:
-            continue
-
-        seconds = parse_duration(
-            content.get(
-                "duration",
-                ""
-            )
-        )
-
-        video = {
-
-            "video_id": video_id,
-
-            # ACTUAL YOUTUBE TITLE
-            "title": title,
-
-            "channel": clean_text(
-                snippet.get(
-                    "channelTitle"
-                )
-            ),
-
-            "views": safe_int(
-                statistics.get(
-                    "viewCount",
-                    0
-                )
-            ),
-
-            "likes": safe_int(
-                statistics.get(
-                    "likeCount",
-                    0
-                )
-            ),
-
-            "comments": safe_int(
-                statistics.get(
-                    "commentCount",
-                    0
-                )
-            ),
-
-            "duration_seconds": seconds,
-
-            "duration": format_duration(
-                seconds
-            ),
-
-            "format": classify_format(
-                seconds
-            ),
-
-            "genre": classify_genre(
-                title
-            ),
-
-            "subgenre": classify_subgenre(
-                title
-            ),
-
-            "country": country_code,
-
-            "url": (
-                "https://www.youtube.com/watch?v="
-                + video_id
-            ),
-        }
-
-        videos.append(
-            video
-        )
-
-    return videos
+        cat_id = str(snippet.get("categoryId", ""))
+        out.append(Video(
+            video_id=vid,
+            title=clean_text(snippet.get("title", "Untitled")),
+            channel=clean_text(snippet.get("channelTitle", "Unknown channel")),
+            channel_id=snippet.get("channelId", ""),
+            views=safe_int(stats.get("viewCount")),
+            likes=safe_int(stats.get("likeCount")),
+            comments=safe_int(stats.get("commentCount")),
+            duration_seconds=parse_iso_duration(details.get("duration", "")),
+            published_at=snippet.get("publishedAt", ""),
+            category_id=cat_id,
+            category=CATEGORY_NAMES.get(cat_id, "Other"),
+            region=region,
+            url=f"https://www.youtube.com/watch?v={vid}",
+        ))
+    return out
 
 
-def collect_youtube_data():
+def collect_data() -> Tuple[List[Video], List[Video], Dict[str, str]]:
+    errors: Dict[str, str] = {}
+    india: List[Video] = []
+    world: List[Video] = []
 
-    all_videos = []
+    try:
+        india = fetch_region("IN")
+    except Exception as exc:
+        errors["IN"] = str(exc)
 
-    errors = []
-
-    countries = [
-        INDIA_CODE
-    ] + WORLD_COUNTRIES
-
-    for country in countries:
-
+    for country in WORLD_COUNTRIES:
         try:
-
-            videos = fetch_country_videos(
-                country
-            )
-
-            print(
-                f"[YouTube] {country}: "
-                f"{len(videos)} videos"
-            )
-
-            all_videos.extend(
-                videos
-            )
-
+            world.extend(fetch_region(country))
         except Exception as exc:
+            errors[country] = str(exc)
 
-            message = (
-                f"{country}: "
-                f"{type(exc).__name__}: "
-                f"{exc}"
-            )
-
-            print(
-                "[YouTube ERROR] "
-                + message
-            )
-
-            errors.append(
-                message
-            )
-
-    # Remove duplicate video IDs.
-    unique = {}
-
-    for video in all_videos:
-
-        unique[
-            video["video_id"]
-        ] = video
-
-    return (
-        list(unique.values()),
-        errors
-    )
+    world = dedupe_videos(world)
+    return india, world, errors
 
 
 # ============================================================
-# VIDEO FILTERS
+# GENRE / SUBGENRE CLASSIFICATION
 # ============================================================
 
-def india_videos(
-    videos
-):
-
-    return [
-        v
-        for v in videos
-        if v["country"] == "IN"
-    ]
-
-
-def world_videos(
-    videos
-):
-
-    return [
-        v
-        for v in videos
-        if v["country"] != "IN"
-    ]
-
-
-def shorts_videos(
-    videos
-):
-
-    return [
-        v
-        for v in videos
-        if v["format"] == "Shorts"
-    ]
-
-
-def longform_videos(
-    videos
-):
-
-    return [
-        v
-        for v in videos
-        if v["format"]
-        == "Long-form 8–10 min"
-    ]
-
-
-# ============================================================
-# TREND RANKING
-# ============================================================
-
-def trend_score(
-    video: Dict[str, Any]
-) -> float:
-
-    views = safe_int(
-        video.get(
-            "views",
-            0
-        )
-    )
-
-    likes = safe_int(
-        video.get(
-            "likes",
-            0
-        )
-    )
-
-    comments = safe_int(
-        video.get(
-            "comments",
-            0
-        )
-    )
-
-    # Log-like weighting without
-    # needing numpy.
-    return (
-        (views ** 0.60)
-        + (likes ** 0.35) * 20
-        + (comments ** 0.30) * 15
-    )
-
-
-def rank_videos(
-    videos: List[Dict[str, Any]],
-    limit: int = SOURCE_VIDEO_LIMIT
-):
-
-    return sorted(
-        videos,
-        key=trend_score,
-        reverse=True
-    )[:limit]
-
-
-# ============================================================
-# GENRE TREND ANALYSIS
-# ============================================================
-
-def genre_analysis(
-    videos
-):
-
-    result = {}
-
-    for video in videos:
-
-        genre = video[
-            "genre"
-        ]
-
-        subgenre = video[
-            "subgenre"
-        ]
-
-        if genre not in result:
-
-            result[
-                genre
-            ] = {}
-
-        if subgenre not in result[
-            genre
-        ]:
-
-            result[
-                genre
-            ][
-                subgenre
-            ] = []
-
-        result[
-            genre
-        ][
-            subgenre
-        ].append(
-            video
-        )
-
-    return result
-
-
-def sorted_genre_analysis(
-    videos
-):
-
-    groups = genre_analysis(
-        videos
-    )
-
-    output = []
-
-    for genre, subgenres in groups.items():
-
-        all_items = []
-
-        for items in subgenres.values():
-            all_items.extend(
-                items
-            )
-
-        total_views = sum(
-            v["views"]
-            for v in all_items
-        )
-
-        output.append(
-            {
-                "genre": genre,
-                "count": len(
-                    all_items
-                ),
-                "views": total_views,
-                "subgenres": subgenres,
-            }
-        )
-
-    return sorted(
-        output,
-        key=lambda x: (
-            x["count"],
-            x["views"]
-        ),
-        reverse=True
-    )
-
-
-# ============================================================
-# SOURCE VIDEO REPORT
-# ============================================================
-
-def render_source_videos(
-    videos
-):
-
-    if not videos:
-
-        return (
-            "No matching videos were "
-            "returned by the YouTube API."
-        )
-
-    lines = []
-
-    ranked = rank_videos(
-        videos
-    )
-
-    for index, video in enumerate(
-        ranked,
-        start=1
-    ):
-
-        lines.append(
-            f"{index}. **{video['title']}**"
-        )
-
-        lines.append(
-            f"   - Channel: "
-            f"{video['channel']}"
-        )
-
-        lines.append(
-            f"   - Views: "
-            f"{format_views(video['views'])}"
-        )
-
-        lines.append(
-            f"   - Duration: "
-            f"{video['duration']}"
-        )
-
-        lines.append(
-            f"   - Genre: "
-            f"{video['genre']}"
-        )
-
-        lines.append(
-            f"   - Subgenre: "
-            f"{video['subgenre']}"
-        )
-
-        lines.append(
-            f"   - YouTube: "
-            f"{video['url']}"
-        )
-
-        lines.append("")
-
-    return "\n".join(
-        lines
-    )
-
-
-# ============================================================
-# CREATIVE QUALITY CONTROL
-# ============================================================
-
-BANNED_PATTERNS = [
-
-    "reaction to",
-
-    "reacting to",
-
-    "i reacted",
-
-    "24 hour challenge",
-
-    "24 hours",
-
-    "last to leave",
-
-    "i tried",
-
-    "top 10",
-
-    "top 5",
-
-    "you won't believe",
-
-    "secret nobody knows",
-
-    "why this is going viral",
-
-    "this went viral",
-
-    "viral because",
-
+GENRE_RULES: List[Tuple[str, str, List[str]]] = [
+    ("Entertainment", "Thriller", ["thriller", "mystery", "killer", "crime", "murder", "suspense", "investigation", "case"]),
+    ("Entertainment", "Comedy", ["comedy", "funny", "roast", "prank", "joke", "comedy", "standup"]),
+    ("Entertainment", "Reaction", ["reaction", "reacts", "reacting", "first time watching"]),
+    ("Entertainment", "Reality / Challenge", ["challenge", "survive", "24 hours", "last to", "competition"]),
+    ("Entertainment", "Storytelling / Drama", ["story", "drama", "film", "movie", "short film", "episode"]),
+    ("Entertainment", "Celebrity / Pop Culture", ["celebrity", "actor", "actress", "star", "interview", "bollywood", "tollywood"]),
+    ("Music", "Song / Performance", ["song", "music", "lyric", "concert", "performance", "cover", "singer"]),
+    ("Music", "Trailer / OST", ["trailer", "teaser", "ost", "audio", "theme"]),
+    ("Gaming", "Gameplay", ["gameplay", "gaming", "minecraft", "gta", "valorant", "free fire", "bgmi", "fortnite"]),
+    ("Gaming", "Story / Lore", ["lore", "ending", "story explained", "secret ending"]),
+    ("News", "Current Affairs", ["news", "breaking", "update", "politics", "election"]),
+    ("Education", "Explainer", ["explained", "how", "tutorial", "learn", "guide", "education"]),
+    ("Science & Technology", "AI / Tech", ["ai", "artificial intelligence", "chatgpt", "tech", "iphone", "android", "robot"]),
+    ("Sports", "Match / Highlights", ["match", "highlights", "cricket", "football", "goal", "ipl", "world cup"]),
+    ("Lifestyle", "Food / Travel", ["food", "restaurant", "street food", "travel", "vlog", "hotel"]),
 ]
 
 
-def is_silly_or_generic(
-    title: str
-) -> bool:
+def infer_genre(video: Video) -> Tuple[str, str]:
+    text = video.title.lower()
+    # Category-first mapping, then title keywords.
+    if video.category == "Music":
+        if any(k in text for k in ["trailer", "teaser", "ost", "audio"]):
+            return "Music", "Trailer / OST"
+        return "Music", "Song / Performance"
+    if video.category == "Gaming":
+        if any(k in text for k in ["lore", "ending", "explained", "secret"]):
+            return "Gaming", "Story / Lore"
+        return "Gaming", "Gameplay"
+    if video.category == "Comedy":
+        return "Entertainment", "Comedy"
+    if video.category == "Sports":
+        return "Sports", "Match / Highlights"
+    if video.category in {"Education", "Science & Technology"}:
+        return ("Science & Technology", "AI / Tech") if video.category == "Science & Technology" else ("Education", "Explainer")
+    if video.category == "News & Politics":
+        return "News", "Current Affairs"
 
-    text = clean_text(
-        title
-    ).lower()
-
-    for pattern in BANNED_PATTERNS:
-
-        if pattern in text:
-            return True
-
-    return False
+    for genre, subgenre, keywords in GENRE_RULES:
+        if any(k in text for k in keywords):
+            return genre, subgenre
+    return "Entertainment", "General Entertainment"
 
 
 # ============================================================
-# LOCAL FALLBACK IDEAS
+# TREND ANALYSIS
 # ============================================================
 
-LOCAL_IDEA_LIBRARY = {
-
-    "trend_shorts": [
-
-        {
-            "title":
-                "The One Detail Everyone Saw But Nobody Questioned",
-
-            "logline":
-                "Andaru aa detail ni chusaru kani evaru question cheyyaledu; protagonist danini follow avvagane simple incident venaka unna shocking connection bayata padutundi.",
-
-            "concept":
-                "A familiar visual detail becomes the first clue in a compact mystery. Every 10 seconds adds a new interpretation, and the final reveal changes the meaning of the opening shot."
-        },
-
-        {
-            "title":
-                "The Last 10 Seconds Change Everything You Saw Before",
-
-            "logline":
-                "First 40 seconds lo audience ki oka story anipistundi, kani last 10 seconds lo oka small reveal motham previous scenes ni different ga explain chestundi.",
-
-            "concept":
-                "Build a short around controlled misdirection. The audience thinks they understand the situation until one final piece of evidence forces a reinterpretation."
-        },
-
-        {
-            "title":
-                "One Missing Message Explains the Whole Mystery",
-
-            "logline":
-                "Oka ordinary conversation lo missing message ni protagonist kanipettinappudu, mundu jarigina prathi incident ki completely different meaning vastundi.",
-
-            "concept":
-                "The story revolves around a missing digital message. Instead of simply revealing the message, show how each person remembers the event differently."
-        },
-
-        {
-            "title":
-                "The Camera Captured Something Nobody Was Looking For",
-
-            "logline":
-                "Camera lo accidental ga capture ayina oka tiny detail ni protagonist notice chestadu; danini follow chesthe expected story completely reverse avutundi.",
-
-            "concept":
-                "Use visual evidence as the protagonist. The audience can see the clue before the character understands its importance."
-        },
-
-        {
-            "title":
-                "Everyone Has the Same Story — Except One Detail",
-
-            "logline":
-                "Andaru same incident gurinchi same story cheptaru, kani oka person cheppina single detail valla entire truth doubt lo padutundi.",
-
-            "concept":
-                "A short investigation built around conflicting memories. The final answer is not simply who lied, but why the versions differ."
-        },
-
-        {
-            "title":
-                "The Object That Was Never Supposed to Be There",
-
-            "logline":
-                "Normal place lo undakudadani oka object kanipistundi; dani owner ni trace chestu vellinappudu story completely unexpected direction lo turn avutundi.",
-
-            "concept":
-                "An ordinary object becomes a mystery engine. Each owner adds another layer until the final owner connects back to the opening."
-        },
-
-        {
-            "title":
-                "A Normal Door With One Impossible Clue",
-
-            "logline":
-                "Door chala normal ga untundi kani dani meeda unna oka tiny clue protagonist ni follow cheyyamani force chestundi, final lo aa clue story motham marchestundi.",
-
-            "concept":
-                "A visually simple mystery with escalating evidence and a clean final reveal."
-        },
-
-        {
-            "title":
-                "The Person Who Knew What Would Happen Next",
-
-            "logline":
-                "Oka stranger next event mundhe exact ga cheptadu; protagonist adi coincidence anukuntadu kani third prediction tarvatha danger real ani ardham avutundi.",
-
-            "concept":
-                "Start with a seemingly impossible prediction and escalate from coincidence to consequence."
-        },
-    ],
-
-    "trend_long": [
-
-        {
-            "title":
-                "I Followed One Strange Clue Until It Connected to Everything",
-
-            "logline":
-                "Modatlo insignificant ga kanipinchina oka clue ni follow chestu vellinappudu, adi completely unrelated anukunna incidents anni connect chestundani protagonist discover chestadu.",
-
-            "concept":
-                "An 8–10 minute investigation. Start with one compelling clue, introduce competing explanations, eliminate them through evidence, and finish with a human consequence rather than a cheap twist."
-        },
-
-        {
-            "title":
-                "The Story Behind the Thing Everyone Scrolls Past",
-
-            "logline":
-                "Andaru daily chusi ignore chese oka ordinary thing venaka actual story enti ani investigate chesthe, expected answer kanna emotional ga stronger truth bayata padutundi.",
-
-            "concept":
-                "Take an ordinary object, location or routine and investigate its hidden history through people, evidence and unexpected connections."
-        },
-
-        {
-            "title":
-                "Three Clues. One Answer. But the Obvious Answer Is Wrong.",
-
-            "logline":
-                "Audience ki three strong clues istaru; first answer obvious ga anipistundi kani investigation advance ayye koddi aa answer impossible ani prove avutundi.",
-
-            "concept":
-                "Audience participates in solving the mystery. Every clue should be useful, not filler, and the final explanation should be logically satisfying."
-        },
-
-        {
-            "title":
-                "The Version of the Story We Were Never Shown",
-
-            "logline":
-                "Popular version simple ga anipinchina, missing perspective ni investigate chesthe story lo important piece intentionally kanipinchakunda poyindani telustundi.",
-
-            "concept":
-                "Reconstruct a familiar narrative from the perspective that is usually absent."
-        },
-
-        {
-            "title":
-                "What Really Happened Between These Two Moments?",
-
-            "logline":
-                "Story lo before mariyu after clear ga unnayi kani madhyalo jarigina few minutes complete mystery; evidence tho aa missing timeline ni reconstruct chestam.",
-
-            "concept":
-                "A timeline mystery where every discovery reveals another missing minute."
-        },
-
-        {
-            "title":
-                "The Detail That Explains the Entire Mystery",
-
-            "logline":
-                "Motham investigation confusing ga unna time lo protagonist repeated ga ignore chesina oka tiny detail final ga complete answer ki key avutundi.",
-
-            "concept":
-                "Build the entire video around a clue viewers can theoretically notice themselves."
-        },
-
-        {
-            "title":
-                "One Decision That Quietly Changed Everything",
-
-            "logline":
-                "Ordinary decision laga kanipinchina oka choice next events ni silently influence chestundi; final lo aa first decision importance reveal avutundi.",
-
-            "concept":
-                "A cause-and-effect story where each consequence leads naturally to the next."
-        },
-
-        {
-            "title":
-                "The Mystery Hidden Inside an Ordinary Place",
-
-            "logline":
-                "Normal place lo years nunchi ignore ayina pattern ni protagonist notice chestadu; evidence collect chestu vellaga place gurinchi audience ki unna perception completely change avutundi.",
-
-            "concept":
-                "Turn an ordinary location into a story world through clues, people, history and escalating discovery."
-        },
-    ],
-
-    "general_shorts": [
-
-        {
-            "title":
-                "The Question Nobody Asks About an Ordinary Thing",
-
-            "logline":
-                "Daily life lo andariki familiar ayina oka thing gurinchi simple question adigithe, answer expected ga undadu; aa answer venaka interesting story untundi.",
-
-            "concept":
-                "Curiosity comes from making viewers reconsider something they see every day."
-        },
-
-        {
-            "title":
-                "A Story That Looks Simple Until the Final Detail",
-
-            "logline":
-                "First lo ordinary incident laga start ayina story final detail reveal ayye sariki audience beginning ni malli think cheyyalsi vastundi.",
-
-            "concept":
-                "A compact narrative with a fair-play twist."
-        },
-
-        {
-            "title":
-                "One Choice. Two Futures.",
-
-            "logline":
-                "Oka character mundu rendu choices untayi; video parallel ga rendu futures ni chupinchi, final lo unexpected choice impact ni reveal chestundi.",
-
-            "concept":
-                "Use parallel storytelling to make a simple decision feel high stakes."
-        },
-
-        {
-            "title":
-                "The Smallest Detail That Changes a Decision",
-
-            "logline":
-                "Decision almost final ayina moment lo tiny information dorukutundi; aa information valla character complete opposite choice teesukuntadu.",
-
-            "concept":
-                "Show how one piece of information changes human behaviour."
-        },
-
-        {
-            "title":
-                "Three People Remember the Same Event Differently",
-
-            "logline":
-                "Oke incident ni three people completely different ga remember chestaru; final evidence vallandari memories lo oka hidden common point ni reveal chestundi.",
-
-            "concept":
-                "A psychological mini-mystery told through conflicting perspectives."
-        },
-
-        {
-            "title":
-                "The Experiment Nobody Expected to Work",
-
-            "logline":
-                "Simple experiment fail avutundi ani andariki anipistundi, kani unexpected result vachinappudu real question experiment work ayyinda kaada kaadu — enduku work ayyindo.",
-
-            "concept":
-                "The result creates a second, more interesting question."
-        },
-
-        {
-            "title":
-                "The Place With Three Completely Different Stories",
-
-            "logline":
-                "Oke location ni three different people perspective lo chusthe, same place ki three completely different meanings untayani telustundi.",
-
-            "concept":
-                "Use one physical location to tell three interconnected human stories."
-        },
-
-        {
-            "title":
-                "The Five-Second Decision",
-
-            "logline":
-                "Audience ki five seconds lo decision teesukomani situation istam; taruvatha aa choice ki unexpected consequences chupinchi viewer ni story lo involve chestam.",
-
-            "concept":
-                "Interactive storytelling where the viewer mentally chooses before seeing the consequence."
-        },
-    ],
-
-    "general_long": [
-
-        {
-            "title":
-                "I Investigated an Ordinary Place That Had an Unusual Pattern",
-
-            "logline":
-                "Normal place lo repeated ga jarugutunna unusual pattern ni protagonist notice chestadu; evidence collect chestu vellaga pattern venaka human story bayata padutundi.",
-
-            "concept":
-                "8–10 minute investigation with a visual location, evidence gathering and emotional payoff."
-        },
-
-        {
-            "title":
-                "The Hidden Story Behind an Everyday Object",
-
-            "logline":
-                "Daily use chese ordinary object ni trace chestu vellaga dani history lo unexpected people, decisions mariyu consequences connect avutayi.",
-
-            "concept":
-                "Transform an ordinary object into a narrative journey."
-        },
-
-        {
-            "title":
-                "What Happens When You Follow One Question Too Far?",
-
-            "logline":
-                "Simple question ki answer kosam start ayina journey, successive questions valla much bigger story ni uncover chestundi.",
-
-            "concept":
-                "Every answer should create a more interesting question."
-        },
-
-        {
-            "title":
-                "The Missing Piece That Changes the Entire Story",
-
-            "logline":
-                "Story lo important piece missing undani protagonist realize chestadu; aa piece dorikina tarvatha already telisina facts anni new meaning pondutayi.",
-
-            "concept":
-                "Use missing information as the central storytelling device."
-        },
-
-        {
-            "title":
-                "The Mystery That Can Be Solved From Three Details",
-
-            "logline":
-                "Audience mundu three details petti mystery solve cheyyamani invite chestam; clues connect chestu vellaga obvious answer wrong ani prove avutundi.",
-
-            "concept":
-                "Fair-play mystery where the audience has enough information to theorize."
-        },
-
-        {
-            "title":
-                "The Day One Small Problem Became a Much Bigger Story",
-
-            "logline":
-                "Tiny problem solve cheyyadaniki teesukunna first step next problem create chestundi; chain reaction final ga original problem kanna completely bigger situation create chestundi.",
-
-            "concept":
-                "A tightly escalating cause-and-effect story."
-        },
-
-        {
-            "title":
-                "The Real Story Behind a Familiar Story",
-
-            "logline":
-                "Andariki already telisina version ni pakkana petti missing evidence ni search chesthe, familiar story ki emotional ga stronger explanation dorukutundi.",
-
-            "concept":
-                "Separate the popular narrative from the evidence and reconstruct the story."
-        },
-
-        {
-            "title":
-                "One Detail Everyone Ignored for Years",
-
-            "logline":
-                "Years ga andariki visible ga unna detail ni evaru serious ga teesukoledu; protagonist danini investigate chesthe unexpected connection bayata padutundi.",
-
-            "concept":
-                "A long-form investigation built around one overlooked piece of evidence."
-        },
-    ],
-
-    "genre_combo": [
-
-        {
-            "title":
-                "Mystery + Thriller: The Clue That Was Waiting for Someone to Notice",
-
-            "logline":
-                "Simple clue laga kanipinchina detail actually countdown ki first signal ani protagonist late ga realize chestadu; truth kosam race start avutundi.",
-
-            "concept":
-                "Mystery provides the question; thriller provides the ticking clock."
-        },
-
-        {
-            "title":
-                "Comedy + Mystery: Everyone Has a Different Explanation",
-
-            "logline":
-                "Strange incident ki prathi person funny explanation istadu, kani clues serious truth vaipu point chestu vellaga comedy slowly genuine mystery ga marutundi.",
-
-            "concept":
-                "Begin lightly, then allow the mystery to become increasingly serious."
-        },
-
-        {
-            "title":
-                "Crime + Technology: The Digital Detail Nobody Noticed",
-
-            "logline":
-                "Ordinary digital record lo unna tiny timestamp protagonist ki dorukutundi; aa one detail entire case timeline ni reverse chestundi.",
-
-            "concept":
-                "Combine digital evidence with a human investigation."
-        },
-
-        {
-            "title":
-                "Documentary + Thriller: The Countdown Hidden in Plain Sight",
-
-            "logline":
-                "Documentary-style evidence collect chestu vellaga protagonist ki situation already countdown mode lo undani telustundi.",
-
-            "concept":
-                "Real-world investigation structure with thriller pacing."
-        },
-
-        {
-            "title":
-                "Drama + Mystery: The Memory That Does Not Match",
-
-            "logline":
-                "Emotional incident gurinchi protagonist ki oka memory untundi kani evidence aa memory ni contradict chestundi; truth search emotional conflict ga marutundi.",
-
-            "concept":
-                "The mystery is also a character relationship problem."
-        },
-
-        {
-            "title":
-                "Gaming + Thriller: The Prediction That Appears in Real Life",
-
-            "logline":
-                "Game lo random prediction laga kanipinchina event real life lo repeat ayye sariki player next prediction ni stop cheyyadaniki try chestadu.",
-
-            "concept":
-                "Use gaming mechanics as the logic of a suspense story."
-        },
-
-        {
-            "title":
-                "Technology + Mystery: The Pattern Hidden in Ordinary Data",
-
-            "logline":
-                "Huge data lo random laga kanipinchina pattern actually one human story ni reveal chestundi; pattern ni trace chestu vellaga stakes perigipothayi.",
-
-            "concept":
-                "Data becomes the clue system for a human mystery."
-        },
-
-        {
-            "title":
-                "Entertainment + Crime: The Perfect Public Story",
-
-            "logline":
-                "Public ki perfect ga kanipinche story lo tiny contradictions ni investigate chesthe, image venaka completely different conflict reveal avutundi.",
-
-            "concept":
-                "Combine entertainment-world glamour with investigation and human stakes."
-        },
-    ],
-}
+def velocity_score(video: Video) -> float:
+    # Approximate view velocity. It is an editorial signal, not an official YouTube metric.
+    return video.views / max(age_days(video.published_at), 0.5)
+
+
+def popularity_score(video: Video) -> float:
+    return math.log10(max(video.views, 1)) * 10 + math.log10(max(velocity_score(video), 1)) * 6
+
+
+def select_format(videos: List[Video], fmt: str) -> List[Video]:
+    if fmt == "shorts":
+        return [v for v in videos if v.is_short]
+    if fmt == "long_8_10":
+        return [v for v in videos if v.is_long_8_10]
+    return videos
+
+
+def top_videos(videos: List[Video], fmt: str, n: int = MAX_TREND_VIDEOS_IN_REPORT) -> List[Video]:
+    subset = select_format(videos, fmt)
+    return sorted(subset, key=popularity_score, reverse=True)[:n]
+
+
+def trend_clusters(videos: List[Video], fmt: str, n: int = 8) -> List[Dict[str, Any]]:
+    subset = select_format(videos, fmt)
+    groups: Dict[Tuple[str, str], List[Video]] = defaultdict(list)
+    for v in subset:
+        genre, subgenre = infer_genre(v)
+        groups[(genre, subgenre)].append(v)
+
+    rows = []
+    total_views = sum(v.views for v in subset) or 1
+    for (genre, subgenre), items in groups.items():
+        if len(items) < 1:
+            continue
+        items = sorted(items, key=popularity_score, reverse=True)
+        views = sum(v.views for v in items)
+        velocity = safe_mean(velocity_score(v) for v in items)
+        score = (len(items) * 2.0) + math.log10(max(views, 1)) + math.log10(max(velocity, 1))
+        rows.append({
+            "genre": genre,
+            "subgenre": subgenre,
+            "count": len(items),
+            "combined_views": views,
+            "share": views / total_views,
+            "velocity": velocity,
+            "score": score,
+            "videos": items[:5],
+        })
+    return sorted(rows, key=lambda x: x["score"], reverse=True)[:n]
+
+
+def phrase_trends(videos: List[Video], fmt: str, n: int = 8) -> List[Dict[str, Any]]:
+    subset = select_format(videos, fmt)
+    if not subset:
+        return []
+    counter = Counter()
+    for v in subset:
+        counter.update(title_words(v.title))
+    rows = []
+    for word, count in counter.most_common(40):
+        if count < 2:
+            continue
+        matches = [v for v in subset if re.search(rf"\b{re.escape(word)}\b", v.title.lower())]
+        views = sum(v.views for v in matches)
+        rows.append({"term": word, "count": count, "views": views, "videos": sorted(matches, key=lambda x: x.views, reverse=True)[:4]})
+    return sorted(rows, key=lambda x: (x["count"], x["views"]), reverse=True)[:n]
+
+
+def why_trending(videos: List[Video], fmt: str, genre: str, subgenre: str) -> str:
+    subset = [v for v in videos if infer_genre(v) == (genre, subgenre) and ((fmt == "shorts" and v.is_short) or (fmt == "long_8_10" and v.is_long_8_10))]
+    if not subset:
+        return "Not enough matching videos to make a reliable explanation."
+    avg_age = safe_mean(age_days(v.published_at) for v in subset)
+    avg_views = safe_mean(v.views for v in subset)
+    recent = sum(1 for v in subset if age_days(v.published_at) <= 3)
+    velocities = [velocity_score(v) for v in subset]
+    med_velocity = statistics.median(velocities) if velocities else 0
+
+    reasons = []
+    if recent / len(subset) >= 0.4:
+        reasons.append("many high-performing examples are very recent")
+    if med_velocity > 100_000:
+        reasons.append("view velocity is strong relative to the age of the videos")
+    if len(subset) >= 4:
+        reasons.append("the format is appearing repeatedly across multiple channels")
+    if genre == "Entertainment" and subgenre == "Thriller":
+        reasons.append("mystery, stakes and reveal-driven packaging create a strong curiosity gap")
+    elif genre == "Entertainment" and subgenre == "Comedy":
+        reasons.append("fast emotional payoff and highly shareable moments fit short attention cycles")
+    elif genre == "Music":
+        reasons.append("new releases, teasers and performances naturally create repeat viewing and discussion")
+    elif genre == "Gaming":
+        reasons.append("game updates, gameplay moments and lore create strong community participation")
+    elif genre == "News":
+        reasons.append("freshness and information urgency make viewers check the topic quickly")
+    else:
+        reasons.append("the topic combines audience familiarity with a clear reason to click now")
+    return "; ".join(reasons).capitalize() + "."
 
 
 # ============================================================
-# LOCAL IDEA BUILDER
+# CREATIVE IDEA ENGINE
 # ============================================================
 
-def build_local_ideas():
-
-    result = {}
-
-    for section, items in LOCAL_IDEA_LIBRARY.items():
-
-        result[
-            section
-        ] = []
-
-        for index in range(
-            IDEAS_PER_SECTION
-        ):
-
-            source = items[
-                index % len(items)
-            ]
-
-            result[
-                section
-            ].append(
-                {
-                    "title":
-                        source["title"],
-
-                    "logline":
-                        source["logline"],
-
-                    "concept":
-                        source["concept"],
-
-                    "format":
-                        (
-                            "Shorts"
-                            if section
-                            in {
-                                "trend_shorts",
-                                "general_shorts",
-                            }
-                            else
-                            "8–10 min"
-                        ),
-
-                    "source_inspiration":
-                        "Original concept",
-
-                    "editorial_score":
-                        {
-                            "curiosity": 9,
-                            "story": 9,
-                            "visual": 8,
-                            "payoff": 9,
-                            "overall": 9,
-                        },
-                }
-            )
-
-    return result
-
-
-# ============================================================
-# OPENROUTER PROMPT
-# ============================================================
-
-SYSTEM_PROMPT = r"""
-You are an elite YouTube creative director and story strategist.
-
-Your job is to generate ideas that make the creator say:
-
-"WAH. WHAT A IDEA."
-
-NOT generic YouTube ideas.
-
-NOT silly ideas.
-
-NOT low-effort ideas.
-
-NOT random challenges.
-
-NOT reaction videos.
-
-NOT "I tried X".
-
-NOT "24 hours".
-
-NOT "Top 10".
-
-NOT fake mystery clickbait.
-
-NOT empty "you won't believe" titles.
-
-Every concept must have a real story engine.
-
-A great idea should contain several of these:
-
-1. Strong curiosity gap
-2. Specific premise
-3. Human stakes
-4. Conflict
-5. Escalation
-6. Visual storytelling
-7. A question viewers genuinely want answered
-8. A reversal / discovery / emotional payoff
-9. A reason to watch until the end
-10. Something the creator can realistically produce
-
-The idea must be ORIGINAL.
-
-Trend source videos are inspiration only.
-NEVER copy the source title.
-NEVER simply remake the source video.
-
-ROMAN TELUGU:
-
-Loglines must sound like natural spoken Roman Telugu.
-
-Avoid awkward translated Telugu.
-
-Use conversational Roman Telugu such as:
-
-"Modatlo simple incident laga kanipistundi kani..."
-
-"Protagonist aa clue ni follow chestu vellaga..."
-
-"Last lo audience beginning ni malli different angle lo chudalsi vastundi."
-
-Do NOT produce silly loglines.
-
---------------------------------------------------
-SECTION DEFINITIONS
---------------------------------------------------
-
-trend_shorts:
-Current India/World YouTube trend-inspired Shorts.
-Must be original.
-
-trend_long:
-Current India/World YouTube trend-inspired 8–10 minute videos.
-Must be original.
-
-general_shorts:
-NOT based on current YouTube trends.
-Purely strong original ideas.
-
-general_long:
-NOT based on current YouTube trends.
-8–10 minute strong original ideas.
-
-genre_combo:
-Combine genre/subgenre patterns intelligently.
-Examples:
-Mystery + Thriller
-Comedy + Mystery
-Crime + Technology
-Drama + Investigation
-Gaming + Thriller
-Documentary + Thriller
-
---------------------------------------------------
-HIGH CTR TOP IDEA
---------------------------------------------------
-
-Also generate one single BEST idea.
-
-This must be the strongest idea in the entire report.
-
-It should be:
-- highly clickable
-- emotionally interesting
-- easy to understand
-- visually strong
-- story-driven
-- not silly
-- not generic
-- capable of carrying an 8–10 minute video
-
-Return:
-
-{
-  "high_ctr": {
-    "title": "...",
-    "logline": "...",
-    "concept": "...",
-    "why_it_works": "...",
-    "editorial_score": 9.5
-  },
-
-  "trend_shorts": [8 objects],
-  "trend_long": [8 objects],
-  "general_shorts": [8 objects],
-  "general_long": [8 objects],
-  "genre_combo": [8 objects]
-}
-
-Each idea object:
-
-{
-  "title": "...",
-  "logline": "...",
-  "concept": "...",
-  "format": "Shorts" or "8–10 min",
-  "source_inspiration": "...",
-  "editorial_score": {
-      "curiosity": 1-10,
-      "story": 1-10,
-      "visual": 1-10,
-      "payoff": 1-10,
-      "overall": 1-10
-  }
-}
-
-Scores are EDITORIAL ESTIMATES.
-They are NOT real YouTube CTR measurements.
-
-Return ONLY valid JSON.
-No markdown.
-No explanation.
-"""
-
-
-def build_ai_input(
-    videos
-):
-
-    # Send only strongest source videos
-    # to keep prompt size manageable.
-
-    top = rank_videos(
-        videos,
-        45
-    )
-
-    sources = []
-
-    for video in top:
-
-        sources.append(
-            {
-                "actual_title":
-                    video["title"],
-
-                "channel":
-                    video["channel"],
-
-                "views":
-                    video["views"],
-
-                "duration":
-                    video["duration"],
-
-                "format":
-                    video["format"],
-
-                "genre":
-                    video["genre"],
-
-                "subgenre":
-                    video["subgenre"],
-
-                "country":
-                    video["country"],
-
-                "url":
-                    video["url"],
-            }
+ROMAN_TELUGU_PATTERNS = [
+    "Ee story lo audience ki first nunchi oka doubt untundi: {question}. Kani ending varaku answer reveal avvadu; clues tho tension perigipothundi.",
+    "Manam normal ga chuse {topic} venaka oka unexpected human story ni follow chestam. Prathi stage lo stakes periguthu, last lo meaning complete ga maaripothundi.",
+    "Oka simple decision tho start ayye ee story, {escalation} varaku vellipothundi. Audience ki final reveal mundu varaku next step guess cheyyadam kashtam.",
+    "Ee idea lo hook matrame kaadu, complete story engine untundi: {question}. Clues, conflict mariyu final reversal kalisi strong payoff istayi.",
+]
+
+# Deliberately avoids weak generic challenge/reaction formats.
+STRONG_SHORTS = [
+    ("The 60-Second Mystery", "Oka public place lo camera capture chesina 3 tiny clues ni connect chesi, 60 seconds lo hidden story ni audience tho solve cheyyadam.", "Ee video lo 3 clues kanipistayi kani real meaning last seconds varaku teliyadu. Audience comments lo theory build chestaru."),
+    ("The Last Message", "Oka person delete cheyyaboye phone lo dorikina final voice note ni story ga reconstruct cheyyadam.", "Oka voice note venaka em jarigindo clues dwara reveal chestam; final line entire story meaning ni reverse chestundi."),
+    ("Before / After: One Decision", "Oka ordinary decision ki two possible futures ni parallel visual storytelling tho chupinchadam.", "Oka chinna decision life ni ela completely marchestundo two timelines lo compare chestam; ending lo original choice reveal avvutundi."),
+    ("The Object That Knows", "Old object/photo/receipt ni follow chestu, adi evaru use chesaro clues tho discover cheyyadam.", "Audience ki object first mystery laga untundi; final owner story emotional ga connect avvutundi."),
+]
+
+STRONG_LONG = [
+    ("The 8-Minute Investigation", "Oka ordinary-looking incident ni clues, timeline mariyu contradictions tho investigate chesi final explanation reach avvadam.", "First 2 minutes lo question establish chestam; middle lo clues contradict avutayi; final lo simple-looking detail entire case ni solve chestundi."),
+    ("One Night, Three Versions", "Oka incident ni three different people's perspective lo reconstruct chesi, last lo fourth truth reveal cheyyadam.", "Same night ki three stories untayi. Prathi version believable ga untundi; final evidence valla audience mundu assumptions anni reverse avutayi."),
+    ("The Hidden Pattern", "Publicly available ordinary events/data/images lo repeated pattern ni investigate chesi, adi enduku repeat avutundo story-driven ga discover cheyyadam.", "Pattern first coincidence laga kanipistundi. Evidence perigina koddi mystery deep avutundi; payoff lo pattern ki human reason dorukutundi."),
+    ("The Choice With a Cost", "Oka real-world decision ni follow chestu, immediate benefit mariyu long-term consequence rendu sides ni cinematic ga explore cheyyadam.", "First half lo decision correct anipistundi; second half lo hidden cost reveal avutundi; ending audience ni moral question tho vadilestundi."),
+]
+
+GENERAL_SHORT = [
+    ("The Unanswered Question", "Daily life lo everyone ignore chese oka simple question ki visual investigation cheyyadam.", "Question simple ga untundi kani answer kosam unexpected places/persons ni follow chestam; payoff practical ga untundi."),
+    ("A Story Hidden in Plain Sight", "Normal-looking location/object/person routine lo hidden narrative ni clues tho uncover cheyyadam.", "Audience first frame nunchi clues observe chestundi; final reveal mundu shots ki new meaning istundi."),
+    ("One Rule, One Consequence", "Real life lo oka useful rule ni test cheyyadam kaadu; aa rule follow cheyyakapothe exact ga em consequence vastundo story ga chupinchadam.", "Concept practical + emotional ga untundi; final consequence audience expectation ni challenge chestundi."),
+]
+
+GENERAL_LONG = [
+    ("The Story Behind an Ordinary Thing", "Manam rojoo use chese ordinary object/service/location venaka unna surprising chain of people and decisions ni investigate cheyyadam.", "Familiar object tho hook create chesi, origin nunchi present varaku hidden chain ni reveal chestam; final human consequence strongest payoff."),
+    ("What Really Happens Between A and B", "Audience ki familiar process lo visible beginning/end madhya jarige invisible steps ni cinematic investigation ga explain cheyyadam.", "Known process ni fresh mystery laga present chestam; each hidden step stakes ni penchutundi."),
+    ("The Day Everything Almost Changed", "Oka real-world event/decision almost different outcome ki vellina timeline ni evidence and storytelling tho reconstruct cheyyadam.", "Audience already knows the outcome, but story asks how close reality came to changing; tension comes from near-misses."),
+]
+
+
+def source_signals(videos: List[Video], fmt: str, limit: int = 8) -> List[Dict[str, Any]]:
+    rows = []
+    for v in top_videos(videos, fmt, limit):
+        g, sg = infer_genre(v)
+        rows.append({
+            "title": v.title,
+            "channel": v.channel,
+            "views": v.views,
+            "duration": v.duration_text,
+            "genre": g,
+            "subgenre": sg,
+            "url": v.url,
+        })
+    return rows
+
+
+def make_trend_ideas(region_name: str, videos: List[Video], fmt: str, count: int = 6) -> List[Dict[str, Any]]:
+    clusters = trend_clusters(videos, fmt, 6)
+    ideas = []
+    library = STRONG_SHORTS if fmt == "shorts" else STRONG_LONG
+    for i in range(count):
+        genre = clusters[i % len(clusters)] if clusters else {"genre": "Entertainment", "subgenre": "Thriller"}
+        base = library[i % len(library)]
+        title, concept, logline_seed = base
+        trend_name = f"{genre['genre']} → {genre['subgenre']}"
+        if i % 2 == 0:
+            idea_title = f"{trend_name}: {title} — The Clue They Missed"
+        else:
+            idea_title = f"{title}: {trend_name} With a Real Mystery"
+        question = f"{trend_name.lower()} pattern lo audience miss ayye real clue enti?"
+        roman = ROMAN_TELUGU_PATTERNS[i % len(ROMAN_TELUGU_PATTERNS)].format(
+            question=question,
+            topic=trend_name.lower(),
+            escalation="simple clue nunchi complete mystery varaku",
         )
+        ideas.append({
+            "title": idea_title,
+            "format": "Shorts" if fmt == "shorts" else "Long-form (8–10 min)",
+            "region": region_name,
+            "concept": concept,
+            "why_click": f"Uses the current {trend_name} pattern without copying any source title; built around a curiosity gap and a clear payoff.",
+            "roman_telugu_logline": roman,
+            "trend_basis": trend_name,
+            "editorial_ctr": 91 - i,
+            "source_titles": [v.title for v in genre.get("videos", [])[:3]] if "videos" in genre else [],
+        })
+    return ideas
 
-    return sources
 
-
-# ============================================================
-# JSON PARSER
-# ============================================================
-
-def parse_model_json(
-    text: str
-):
-
-    if not text:
-        return None
-
-    text = text.strip()
-
-    # Direct JSON
-    try:
-
-        data = json.loads(
-            text
+def make_general_ideas(region_name: str, fmt: str, count: int = 5) -> List[Dict[str, Any]]:
+    library = GENERAL_SHORT if fmt == "shorts" else GENERAL_LONG
+    ideas = []
+    for i in range(count):
+        title, concept, seed = library[i % len(library)]
+        roman = ROMAN_TELUGU_PATTERNS[(i + 1) % len(ROMAN_TELUGU_PATTERNS)].format(
+            question="manam ignore chese simple detail venaka real story enti",
+            topic="ordinary-looking situation",
+            escalation="small observation nunchi bigger discovery varaku",
         )
+        ideas.append({
+            "title": f"{title} — {region_name} Edition",
+            "format": "Shorts" if fmt == "shorts" else "Long-form (8–10 min)",
+            "region": region_name,
+            "concept": concept,
+            "why_click": "Not based on current YouTube trend data; designed around curiosity, story progression, visual evidence and payoff.",
+            "roman_telugu_logline": roman,
+            "trend_basis": "General original concept — not trend-derived",
+            "editorial_ctr": 88 - i,
+        })
+    return ideas
 
-        if isinstance(
-            data,
-            dict
-        ):
-            return data
 
-    except Exception:
-        pass
-
-    # Remove fences
-    text = re.sub(
-        r"```json",
-        "",
-        text,
-        flags=re.I
-    )
-
-    text = text.replace(
-        "```",
-        ""
-    ).strip()
-
-    try:
-
-        data = json.loads(
-            text
-        )
-
-        if isinstance(
-            data,
-            dict
-        ):
-            return data
-
-    except Exception:
-        pass
-
-    # Find object
-    start = text.find(
-        "{"
-    )
-
-    end = text.rfind(
-        "}"
-    )
-
-    if (
-        start >= 0
-        and end > start
-    ):
-
-        candidate = text[
-            start:end + 1
-        ]
-
-        try:
-
-            data = json.loads(
-                candidate
-            )
-
-            if isinstance(
-                data,
-                dict
-            ):
-                return data
-
-        except Exception:
-            pass
-
-    return None
+def make_genre_combo_ideas(india: List[Video], world: List[Video], count: int = 8) -> List[Dict[str, Any]]:
+    clusters = trend_clusters(india + world, "shorts", 5) + trend_clusters(india + world, "long_8_10", 5)
+    pairs = []
+    for a in clusters:
+        for b in clusters:
+            if a is b:
+                continue
+            key = (a["genre"], a["subgenre"], b["genre"], b["subgenre"])
+            if key not in pairs:
+                pairs.append(key)
+    ideas = []
+    for i, p in enumerate(pairs[:count]):
+        g1, s1, g2, s2 = p
+        title = f"{s1} × {s2}: The Story Nobody Expects"
+        concept = f"Combine the audience language of {g1} → {s1} with the narrative engine of {g2} → {s2}: start with a familiar hook, introduce a real mystery/conflict, then resolve it with a human or emotional payoff."
+        roman = f"{s1} mariyu {s2} rendu kalipi, first frame nunchi oka strong question create chestam. Story progress ayye koddi rendu genres collide avvutayi, final reveal audience expectation ni reverse chestundi."
+        ideas.append({
+            "title": title,
+            "format": "Shorts" if i % 2 == 0 else "Long-form (8–10 min)",
+            "region": "India + World",
+            "concept": concept,
+            "why_click": f"The novelty comes from combining two different audience expectations: {s1} + {s2}.",
+            "roman_telugu_logline": roman,
+            "trend_basis": f"{g1} → {s1} + {g2} → {s2}",
+            "editorial_ctr": 94 - i,
+        })
+    return ideas
 
 
 # ============================================================
-# OPENROUTER - ONE REQUEST ONLY
+# OPTIONAL ONE-SHOT LLM ENHANCEMENT
 # ============================================================
 
-def generate_ai_ideas(
-    videos
-):
-
+def call_openrouter_once(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not OPENROUTER_API_KEY:
-
-        print(
-            "[OpenRouter] "
-            "API key missing."
-        )
-
         return None
-
-    sources = build_ai_input(
-        videos
-    )
-
-    user_prompt = (
-        "Use the following CURRENT YouTube "
-        "source videos to identify patterns. "
-        "Create ORIGINAL ideas.\n\n"
-        "SOURCE VIDEOS:\n"
-        + json.dumps(
-            sources,
-            ensure_ascii=False
-        )
-    )
-
-    payload = {
-
-        "model":
-            OPENROUTER_MODEL,
-
-        "temperature":
-            0.9,
-
-        "max_tokens":
-            9000,
-
+    system = """
+You are a senior YouTube creative strategist. Improve ideas, never make them silly.
+Rules:
+- Exactly use the requested structure.
+- Do not copy source video titles.
+- Avoid generic reaction videos, random challenges, 24-hour challenges, top-10 lists,
+  empty clickbait, fake statistics, or vague 'secret nobody knows' concepts.
+- Every idea needs a concrete story engine: curiosity gap + conflict/question + escalation + payoff.
+- For entertainment, explicitly name subgenre such as Thriller, Comedy, Mystery, Crime,
+  Reaction, Drama, Celebrity/Pop Culture, etc.
+- Roman Telugu loglines must sound natural and cinematic, not translated word-for-word.
+- CTR scores are editorial estimates only, never real predictions.
+- Preserve actual source video titles in trend evidence.
+Return valid JSON only. No markdown fences.
+"""
+    body = {
+        "model": OPENROUTER_MODEL,
+        "temperature": 0.65,
+        "max_tokens": 9000,
         "messages": [
-
-            {
-                "role":
-                    "system",
-
-                "content":
-                    SYSTEM_PROMPT,
-            },
-
-            {
-                "role":
-                    "user",
-
-                "content":
-                    user_prompt,
-            },
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ],
     }
-
-    print(
-        "[OpenRouter] "
-        f"ONE request using "
-        f"{OPENROUTER_MODEL}"
-    )
-
     try:
-
-        response = requests.post(
-
+        r = requests.post(
             OPENROUTER_URL,
-
             headers={
-                "Authorization":
-                    "Bearer "
-                    + OPENROUTER_API_KEY,
-
-                "Content-Type":
-                    "application/json",
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/",
+                "X-Title": "YouTube High CTR Idea Generator",
             },
-
-            json=payload,
-
-            timeout=90,
+            json=body,
+            timeout=60,
         )
-
+        if r.status_code != 200:
+            print(f"[WARN] OpenRouter unavailable ({r.status_code}). Using local engine.")
+            return None
+        data = r.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if not content:
+            return None
+        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.I)
+        parsed = json.loads(content)
+        return parsed if isinstance(parsed, dict) else None
     except Exception as exc:
-
-        print(
-            "[OpenRouter] "
-            f"Request error: {exc}"
-        )
-
+        print(f"[WARN] OpenRouter failed once: {exc}. Using local engine.")
         return None
 
-    # NO RETRY.
-    if response.status_code != 200:
-
-        print(
-            "[OpenRouter] "
-            f"HTTP {response.status_code}"
-        )
-
-        print(
-            "[OpenRouter] "
-            "Using local fallback."
-        )
-
-        return None
-
-    try:
-
-        response_json = (
-            response.json()
-        )
-
-    except Exception:
-
-        print(
-            "[OpenRouter] "
-            "Invalid response JSON."
-        )
-
-        return None
-
-    try:
-
-        content = (
-            response_json[
-                "choices"
-            ][0][
-                "message"
-            ][
-                "content"
-            ]
-        )
-
-    except Exception:
-
-        print(
-            "[OpenRouter] "
-            "No model content."
-        )
-
-        return None
-
-    parsed = parse_model_json(
-        content
-    )
-
-    if not parsed:
-
-        print(
-            "[OpenRouter] "
-            "Malformed model JSON."
-        )
-
-        print(
-            "[OpenRouter] "
-            "Using local fallback."
-        )
-
-        return None
-
-    required = {
-        "high_ctr",
-        "trend_shorts",
-        "trend_long",
-        "general_shorts",
-        "general_long",
-        "genre_combo",
-    }
-
-    missing = (
-        required
-        - set(parsed.keys())
-    )
-
-    if missing:
-
-        print(
-            "[OpenRouter] "
-            f"Missing: {missing}"
-        )
-
-        return None
-
-    print(
-        "[OpenRouter] "
-        "Valid creative JSON received."
-    )
-
-    return parsed
-
 
 # ============================================================
-# VALIDATION
+# REPORT RENDERING
 # ============================================================
 
-def clean_idea(
-    idea,
-    fallback
-):
-
-    if not isinstance(
-        idea,
-        dict
-    ):
-        return fallback
-
-    title = clean_text(
-        idea.get(
-            "title"
-        )
-    )
-
-    logline = clean_text(
-        idea.get(
-            "logline"
-        )
-    )
-
-    concept = clean_text(
-        idea.get(
-            "concept"
-        )
-    )
-
-    if not title or not logline:
-
-        return fallback
-
-    if is_silly_or_generic(
-        title
-    ):
-
-        return fallback
-
-    score = idea.get(
-        "editorial_score",
-        {}
-    )
-
-    if not isinstance(
-        score,
-        dict
-    ):
-        score = {}
-
-    scores = {}
-
-    for key in [
-        "curiosity",
-        "story",
-        "visual",
-        "payoff",
-        "overall",
-    ]:
-
-        value = safe_int(
-            score.get(
-                key,
-                9
-            ),
-            9
-        )
-
-        value = max(
-            1,
-            min(
-                10,
-                value
-            )
-        )
-
-        scores[
-            key
-        ] = value
-
-    return {
-
-        "title":
-            title,
-
-        "logline":
-            logline,
-
-        "concept":
-            concept,
-
-        "format":
-            clean_text(
-                idea.get(
-                    "format"
-                )
-            ),
-
-        "source_inspiration":
-            clean_text(
-                idea.get(
-                    "source_inspiration"
-                )
-            ),
-
-        "editorial_score":
-            scores,
-    }
-
-
-def validate_ai_output(
-    ai_data,
-    local_data
-):
-
-    final = {}
-
-    sections = [
-        "trend_shorts",
-        "trend_long",
-        "general_shorts",
-        "general_long",
-        "genre_combo",
-    ]
-
-    for section in sections:
-
-        final[
-            section
-        ] = []
-
-        ai_items = ai_data.get(
-            section,
-            []
-        )
-
-        if not isinstance(
-            ai_items,
-            list
-        ):
-            ai_items = []
-
-        for index in range(
-            IDEAS_PER_SECTION
-        ):
-
-            fallback = local_data[
-                section
-            ][index]
-
-            item = (
-                ai_items[index]
-                if index < len(
-                    ai_items
-                )
-                else None
-            )
-
-            final[
-                section
-            ].append(
-                clean_idea(
-                    item,
-                    fallback
-                )
-            )
-
-    # High CTR
-    high_ctr = ai_data.get(
-        "high_ctr"
-    )
-
-    if not isinstance(
-        high_ctr,
-        dict
-    ):
-        high_ctr = {}
-
-    high_title = clean_text(
-        high_ctr.get(
-            "title"
-        )
-    )
-
-    high_logline = clean_text(
-        high_ctr.get(
-            "logline"
-        )
-    )
-
-    high_concept = clean_text(
-        high_ctr.get(
-            "concept"
-        )
-    )
-
-    if (
-        not high_title
-        or not high_logline
-        or is_silly_or_generic(
-            high_title
-        )
-    ):
-
-        # Use the strongest trend long idea
-        fallback = final[
-            "trend_long"
-        ][0]
-
-        high_ctr = {
-
-            "title":
-                fallback["title"],
-
-            "logline":
-                fallback["logline"],
-
-            "concept":
-                fallback["concept"],
-
-            "why_it_works":
-                "Strong curiosity gap, "
-                "clear story engine, "
-                "escalation and payoff.",
-
-            "editorial_score":
-                9.2,
-        }
-
-    else:
-
-        high_ctr = {
-
-            "title":
-                high_title,
-
-            "logline":
-                high_logline,
-
-            "concept":
-                high_concept,
-
-            "why_it_works":
-                clean_text(
-                    high_ctr.get(
-                        "why_it_works"
-                    )
-                ),
-
-            "editorial_score":
-                high_ctr.get(
-                    "editorial_score",
-                    9.2
-                ),
-        }
-
-    final[
-        "high_ctr"
-    ] = high_ctr
-
-    return final
-
-
-# ============================================================
-# IDEA MARKDOWN
-# ============================================================
-
-def render_ideas(
-    ideas
-):
-
-    lines = []
-
-    for index, idea in enumerate(
-        ideas,
-        start=1
-    ):
-
-        score = idea.get(
-            "editorial_score",
-            {}
-        )
-
-        overall = score.get(
-            "overall",
-            9
-        )
-
-        lines.append(
-            f"### {index}. "
-            f"{idea['title']}"
-        )
-
-        lines.append("")
-
-        lines.append(
-            "**Roman Telugu Logline:** "
-            + idea["logline"]
-        )
-
-        lines.append("")
-
-        lines.append(
-            "**Concept:** "
-            + idea["concept"]
-        )
-
-        lines.append("")
-
-        if idea.get(
-            "source_inspiration"
-        ):
-
-            source = idea[
-                "source_inspiration"
-            ]
-
-            if source != (
-                "Original concept"
-            ):
-
-                lines.append(
-                    "**Trend inspiration:** "
-                    + source
-                )
-
-                lines.append("")
-
-        lines.append(
-            "**Editorial score:** "
-            f"{overall}/10"
-        )
-
-        lines.append("")
-
-    return "\n".join(
-        lines
-    )
-
-
-# ============================================================
-# FULL REPORT
-# ============================================================
-
-def build_report(
-    videos,
-    ideas,
-    errors
-):
-
-    india = india_videos(
-        videos
-    )
-
-    world = world_videos(
-        videos
-    )
-
-    india_shorts = shorts_videos(
-        india
-    )
-
-    india_long = longform_videos(
-        india
-    )
-
-    world_shorts = shorts_videos(
-        world
-    )
-
-    world_long = longform_videos(
-        world
-    )
-
-    lines = []
-
-    # ========================================================
-    # TOP HIGH CTR IDEA
-    # ========================================================
-
-    high = ideas[
-        "high_ctr"
-    ]
-
-    lines.append(
-        "# YOUTUBE HIGH CTR IDEA GENERATOR"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "# HIGH CTR IDEA"
-    )
-
-    lines.append("")
-
-    lines.append(
-        f"## {high['title']}"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "**Roman Telugu Logline:** "
-        + high["logline"]
-    )
-
-    lines.append("")
-
-    lines.append(
-        "**Concept:** "
-        + high["concept"]
-    )
-
-    lines.append("")
-
-    lines.append(
-        "**Why this can work:** "
-        + high["why_it_works"]
-    )
-
-    lines.append("")
-
-    lines.append(
-        "**Editorial score:** "
-        f"{high['editorial_score']}/10"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "---"
-    )
-
-    lines.append("")
-
-    # ========================================================
-    # 1 INDIA
-    # ========================================================
-
-    lines.append(
-        "# 1. INDIA YOUTUBE TRENDS"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "## Shorts — Which videos are driving the pattern?"
-    )
-
-    lines.append("")
-
-    lines.append(
-        render_source_videos(
-            india_shorts
-        )
-    )
-
-    lines.append("")
-
-    lines.append(
-        "## Long-form 8–10 minutes — Which videos are driving the pattern?"
-    )
-
-    lines.append("")
-
-    lines.append(
-        render_source_videos(
-            india_long
-        )
-    )
-
-    lines.append("")
-
-    # ========================================================
-    # 2 WORLD
-    # ========================================================
-
-    lines.append(
-        "# 2. WORLD YOUTUBE TRENDS"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "## Shorts — Which videos are driving the pattern?"
-    )
-
-    lines.append("")
-
-    lines.append(
-        render_source_videos(
-            world_shorts
-        )
-    )
-
-    lines.append("")
-
-    lines.append(
-        "## Long-form 8–10 minutes — Which videos are driving the pattern?"
-    )
-
-    lines.append("")
-
-    lines.append(
-        render_source_videos(
-            world_long
-        )
-    )
-
-    lines.append("")
-
-    # ========================================================
-    # 3 GENRE
-    # ========================================================
-
-    lines.append(
-        "# 3. YOUTUBE GENRE TRENDS"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "## Shorts Genre Trends"
-    )
-
-    lines.append("")
-
-    render_genre_section(
-        lines,
-        shorts_videos(
-            videos
-        )
-    )
-
-    lines.append(
-        "## Long-form 8–10 min Genre Trends"
-    )
-
-    lines.append("")
-
-    render_genre_section(
-        lines,
-        longform_videos(
-            videos
-        )
-    )
-
-    # ========================================================
-    # 4 TREND SHORTS
-    # ========================================================
-
-    lines.append(
-        "# 4. INDIA/WORLD TREND-BASED SHORTS IDEAS"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "These ideas are inspired by current "
-        "India/World YouTube patterns, "
-        "but are ORIGINAL concepts."
-    )
-
-    lines.append("")
-
-    lines.append(
-        render_ideas(
-            ideas[
-                "trend_shorts"
-            ]
-        )
-    )
-
-    # ========================================================
-    # 5 TREND LONG
-    # ========================================================
-
-    lines.append(
-        "# 5. INDIA/WORLD TREND-BASED LONG-FORM IDEAS"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "Target duration: 8–10 minutes."
-    )
-
-    lines.append("")
-
-    lines.append(
-        render_ideas(
-            ideas[
-                "trend_long"
-            ]
-        )
-    )
-
-    # ========================================================
-    # 6 GENERAL SHORTS
-    # ========================================================
-
-    lines.append(
-        "# 6. INDIA/WORLD GENERAL SHORTS IDEAS"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "These are NOT based on current YouTube trends."
-    )
-
-    lines.append("")
-
-    lines.append(
-        render_ideas(
-            ideas[
-                "general_shorts"
-            ]
-        )
-    )
-
-    # ========================================================
-    # 7 GENERAL LONG
-    # ========================================================
-
-    lines.append(
-        "# 7. INDIA/WORLD GENERAL LONG-FORM IDEAS"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "These are NOT based on current YouTube trends."
-    )
-
-    lines.append("")
-
-    lines.append(
-        "Target duration: 8–10 minutes."
-    )
-
-    lines.append("")
-
-    lines.append(
-        render_ideas(
-            ideas[
-                "general_long"
-            ]
-        )
-    )
-
-    # ========================================================
-    # 8 GENRE COMBINATIONS
-    # ========================================================
-
-    lines.append(
-        "# 8. GENRE-COMBINATION HIGH CTR IDEAS"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "These concepts combine genre/subgenre "
-        "patterns such as Thriller + Mystery, "
-        "Comedy + Mystery, Crime + Technology, "
-        "Drama + Investigation, etc."
-    )
-
-    lines.append("")
-
-    lines.append(
-        render_ideas(
-            ideas[
-                "genre_combo"
-            ]
-        )
-    )
-
-    # ========================================================
-    # DATA NOTES
-    # ========================================================
-
-    lines.append(
-        "# DATA NOTES"
-    )
-
-    lines.append("")
-
-    lines.append(
-        f"- Total videos collected: "
-        f"{len(videos)}"
-    )
-
-    lines.append(
-        f"- India videos: "
-        f"{len(india)}"
-    )
-
-    lines.append(
-        f"- World videos: "
-        f"{len(world)}"
-    )
-
-    lines.append(
-        f"- India Shorts: "
-        f"{len(india_shorts)}"
-    )
-
-    lines.append(
-        f"- India 8–10 min: "
-        f"{len(india_long)}"
-    )
-
-    lines.append(
-        f"- World Shorts: "
-        f"{len(world_shorts)}"
-    )
-
-    lines.append(
-        f"- World 8–10 min: "
-        f"{len(world_long)}"
-    )
-
-    lines.append("")
-
-    if errors:
-
-        lines.append(
-            "## YouTube collection warnings"
-        )
-
-        lines.append("")
-
-        for error in errors:
-
-            lines.append(
-                "- " + error
-            )
-
-        lines.append("")
-
-    lines.append(
-        "NOTE: Editorial scores are creative "
-        "estimates, not actual CTR predictions."
-    )
-
-    return "\n".join(
-        lines
-    )
-
-
-def render_genre_section(
-    lines,
-    videos
-):
-
-    groups = sorted_genre_analysis(
-        videos
-    )
-
-    if not groups:
-
-        lines.append(
-            "No genre data available."
-        )
-
-        lines.append("")
-
-        return
-
-    for group in groups:
-
-        genre = group[
-            "genre"
-        ]
-
-        lines.append(
-            f"### {genre}"
-        )
-
-        lines.append(
-            f"- Videos: "
-            f"{group['count']}"
-        )
-
-        lines.append(
-            f"- Combined views: "
-            f"{format_views(group['views'])}"
-        )
-
-        lines.append("")
-
-        sorted_subgenres = sorted(
-            group[
-                "subgenres"
-            ].items(),
-            key=lambda item: (
-                len(item[1]),
-                sum(
-                    v["views"]
-                    for v in item[1]
-                )
-            ),
-            reverse=True
-        )
-
-        for subgenre, items in (
-            sorted_subgenres[:6]
-        ):
-
-            lines.append(
-                f"#### "
-                f"{genre} → "
-                f"{subgenre}"
-            )
-
-            lines.append(
-                f"- Videos: "
-                f"{len(items)}"
-            )
-
-            lines.append(
-                f"- Combined views: "
-                f"{format_views(sum(v['views'] for v in items))}"
-            )
-
-            lines.append(
-                "- Actual supporting videos:"
-            )
-
-            for video in rank_videos(
-                items,
-                3
-            ):
-
-                lines.append(
-                    f"  - **{video['title']}** "
-                    f"— {video['channel']} "
-                    f"— {format_views(video['views'])} views "
-                    f"— {video['url']}"
-                )
-
-            lines.append("")
-
-
-# ============================================================
-# PDF
-# ============================================================
-
-def create_pdf(
-    markdown,
-    pdf_path
-):
-
-    styles = getSampleStyleSheet()
-
-    title_style = ParagraphStyle(
-        "CustomTitle",
-        parent=styles["Title"],
-        alignment=TA_CENTER,
-        fontSize=19,
-        leading=23,
-        spaceAfter=12
-    )
-
-    h1 = ParagraphStyle(
-        "CustomH1",
-        parent=styles["Heading1"],
-        fontSize=16,
-        leading=20,
-        spaceBefore=12,
-        spaceAfter=7
-    )
-
-    h2 = ParagraphStyle(
-        "CustomH2",
-        parent=styles["Heading2"],
-        fontSize=13,
-        leading=17,
-        spaceBefore=9,
-        spaceAfter=5
-    )
-
-    h3 = ParagraphStyle(
-        "CustomH3",
-        parent=styles["Heading3"],
-        fontSize=10.5,
-        leading=14,
-        spaceBefore=7,
-        spaceAfter=4
-    )
-
-    body = ParagraphStyle(
-        "CustomBody",
-        parent=styles["BodyText"],
-        fontSize=8.5,
-        leading=11.5,
-        spaceAfter=4
-    )
-
-    doc = SimpleDocTemplate(
-        str(pdf_path),
-        pagesize=A4,
-        rightMargin=13 * mm,
-        leftMargin=13 * mm,
-        topMargin=13 * mm,
-        bottomMargin=13 * mm
-    )
-
-    story = []
-
-    for raw in markdown.splitlines():
-
-        line = raw.strip()
-
-        if not line:
-
-            story.append(
-                Spacer(
-                    1,
-                    3
-                )
-            )
-
+def md_escape(text: str) -> str:
+    return clean_text(str(text)).replace("|", "\\|")
+
+
+def video_md(v: Video) -> str:
+    g, sg = infer_genre(v)
+    return (
+        f"- **{md_escape(v.title)}**\n"
+        f"  - Channel: {md_escape(v.channel)}\n"
+        f"  - Views: {v.views_text}\n"
+        f"  - Duration: {v.duration_text}\n"
+        f"  - Genre: {g}\n"
+        f"  - Subgenre: {sg}\n"
+        f"  - Published: {v.published_at[:10] if v.published_at else 'Unknown'}\n"
+        f"  - Source region: {v.region}\n"
+        f"  - YouTube: {v.url}"
+    )
+
+
+def render_trend_section(title: str, videos: List[Video]) -> str:
+    out = [f"# {title}", ""]
+    for fmt, label in [("shorts", "## YouTube Shorts"), ("long_8_10", "## YouTube Long-form (8–10 min)")]:
+        out += [label, ""]
+        selected = top_videos(videos, fmt)
+        if not selected:
+            out += ["_No matching videos were returned for this exact format from the selected YouTube API data._", ""]
             continue
+        clusters = trend_clusters(videos, fmt, 6)
+        for c in clusters:
+            out.append(f"### {c['genre']} → {c['subgenre']}")
+            out.append(f"- Trend strength: {c['count']} matching videos; combined views {compact_number(c['combined_views'])}")
+            out.append(f"- Why it is trending: {why_trending(videos, fmt, c['genre'], c['subgenre'])}")
+            out.append("- Supporting actual videos:")
+            for v in c["videos"][:4]:
+                out.append(video_md(v))
+            out.append("")
+    return "\n".join(out)
 
-        safe = (
-            line
-            .replace(
-                "&",
-                "&amp;"
-            )
-            .replace(
-                "<",
-                "&lt;"
-            )
-            .replace(
-                ">",
-                "&gt;"
-            )
-        )
 
-        safe = re.sub(
-            r"\*\*(.+?)\*\*",
-            r"<b>\1</b>",
-            safe
-        )
+def render_genre_section(india: List[Video], world: List[Video]) -> str:
+    out = ["# 3. YOUTUBE GENRE TRENDS", "", "This section uses the same live video pool but groups it into broad genre + specific subgenre.", ""]
+    for fmt, label in [("shorts", "## Shorts Genre Trends"), ("long_8_10", "## Long-form (8–10 min) Genre Trends")]:
+        out += [label, ""]
+        clusters = trend_clusters(india + world, fmt, 10)
+        if not clusters:
+            out += ["_No matching videos._", ""]
+            continue
+        for c in clusters:
+            out.append(f"### {c['genre']} → {c['subgenre']}")
+            out.append(f"- Videos: {c['count']} | Combined views: {compact_number(c['combined_views'])}")
+            out.append(f"- Why trending: {why_trending(india + world, fmt, c['genre'], c['subgenre'])}")
+            out.append("- Actual supporting titles:")
+            for v in c["videos"][:5]:
+                out.append(video_md(v))
+            out.append("")
+    return "\n".join(out)
 
-        if line.startswith(
-            "# "
-        ):
 
-            story.append(
-                Paragraph(
-                    safe[2:],
-                    title_style
-                )
-            )
+def render_ideas(title: str, ideas: List[Dict[str, Any]]) -> str:
+    out = [f"# {title}", ""]
+    for i, idea in enumerate(ideas, 1):
+        out += [
+            f"## {i}. {idea['title']}",
+            f"- Format: {idea['format']}",
+            f"- Region: {idea['region']}",
+            f"- Concept: {idea['concept']}",
+            f"- Why this can earn the click: {idea['why_click']}",
+            f"- Roman Telugu logline: **{idea['roman_telugu_logline']}**",
+            f"- Trend/genre basis: {idea['trend_basis']}",
+            f"- Editorial CTR potential: **{idea['editorial_ctr']}/100** (not a real CTR prediction)",
+        ]
+        if idea.get("source_titles"):
+            out.append("- Inspiration evidence (do not copy): " + " | ".join(idea["source_titles"]))
+        out.append("")
+    return "\n".join(out)
 
-        elif line.startswith(
-            "## "
-        ):
 
-            story.append(
-                Paragraph(
-                    safe[3:],
-                    h1
-                )
-            )
+def choose_high_ctr(all_ideas: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not all_ideas:
+        return {
+            "title": "The Hidden Clue",
+            "roman_telugu_logline": "Oka simple clue ni follow chestu, audience expect cheyyani story ni reveal cheyyadam.",
+            "editorial_ctr": 80,
+        }
+    return max(all_ideas, key=lambda x: x.get("editorial_ctr", 0))
 
-        elif line.startswith(
-            "### "
-        ):
 
-            story.append(
-                Paragraph(
-                    safe[4:],
-                    h2
-                )
-            )
-
-        elif line.startswith(
-            "#### "
-        ):
-
-            story.append(
-                Paragraph(
-                    safe[5:],
-                    h3
-                )
-            )
-
-        elif line.startswith(
-            "- "
-        ):
-
-            story.append(
-                Paragraph(
-                    "• "
-                    + safe[2:],
-                    body
-                )
-            )
-
-        else:
-
-            story.append(
-                Paragraph(
-                    safe,
-                    body
-                )
-            )
-
-    doc.build(
-        story
+def build_report(india: List[Video], world: List[Video], errors: Dict[str, str]) -> Tuple[str, Dict[str, Any]]:
+    trend_ideas = (
+        make_trend_ideas("India", india, "shorts")
+        + make_trend_ideas("World", world, "shorts")
+        + make_trend_ideas("India", india, "long_8_10")
+        + make_trend_ideas("World", world, "long_8_10")
     )
-
-
-# ============================================================
-# JSON
-# ============================================================
-
-def save_json(
-    videos,
-    ideas,
-    errors,
-    path
-):
+    general_ideas = (
+        make_general_ideas("India", "shorts")
+        + make_general_ideas("World", "shorts")
+        + make_general_ideas("India", "long_8_10")
+        + make_general_ideas("World", "long_8_10")
+    )
+    combo_ideas = make_genre_combo_ideas(india, world)
+    all_ideas = trend_ideas + general_ideas + combo_ideas
+    top = choose_high_ctr(all_ideas)
 
     payload = {
-
-        "generated_at":
-            datetime.now(
-                timezone.utc
-            ).isoformat(),
-
-        "video_count":
-            len(videos),
-
-        "collection_errors":
-            errors,
-
-        "videos":
-            videos,
-
-        "ideas":
-            ideas,
+        "task": "Improve YouTube idea report quality while preserving the 8 requested sections.",
+        "top_candidate": top,
+        "india_trend_evidence": {
+            "shorts": source_signals(india, "shorts"),
+            "long_8_10": source_signals(india, "long_8_10"),
+        },
+        "world_trend_evidence": {
+            "shorts": source_signals(world, "shorts"),
+            "long_8_10": source_signals(world, "long_8_10"),
+        },
+        "draft_ideas": all_ideas,
     }
+    llm = call_openrouter_once(payload)
+    if llm:
+        # Only replace ideas if the model returns a usable list. Trend evidence remains local/real.
+        candidate = llm.get("ideas") if isinstance(llm, dict) else None
+        if isinstance(candidate, list) and candidate:
+            all_ideas = candidate
+            top = choose_high_ctr(all_ideas)
+            print("[OK] OpenRouter enhancement applied once.")
+    else:
+        print("[OK] Local deterministic idea engine used.")
 
-    path.write_text(
-        json.dumps(
-            payload,
-            indent=2,
-            ensure_ascii=False
-        ),
-        encoding="utf-8"
-    )
+    sections = [
+        "# HIGH CTR IDEA",
+        "",
+        f"## {top.get('title', 'The Hidden Clue')}",
+        f"**Roman Telugu logline:** {top.get('roman_telugu_logline', '')}",
+        f"**Editorial CTR potential:** {top.get('editorial_ctr', 0)}/100 — not a real CTR prediction.",
+        "",
+        render_trend_section("1. INDIA YOUTUBE TRENDS", india),
+        render_trend_section("2. WORLD YOUTUBE TRENDS", world),
+        render_genre_section(india, world),
+        render_ideas("4. INDIA/WORLD — TREND-BASED SHORTS IDEAS", [x for x in trend_ideas if x.get("format") == "Shorts"][:12]),
+        render_ideas("5. INDIA/WORLD — TREND-BASED LONG-FORM (8–10 MIN) IDEAS", [x for x in trend_ideas if x.get("format") == "Long-form (8–10 min)"][:12]),
+        render_ideas("6. INDIA/WORLD — GENERAL SHORTS IDEAS (NOT TREND-DERIVED)", [x for x in general_ideas if x.get("format") == "Shorts"]),
+        render_ideas("7. INDIA/WORLD — GENERAL LONG-FORM (8–10 MIN) IDEAS (NOT TREND-DERIVED)", [x for x in general_ideas if x.get("format") == "Long-form (8–10 min)"] ),
+        render_ideas("8. GENRE-COMBINATION HIGH CTR IDEAS", combo_ideas),
+    ]
+    report = "\n\n".join(sections)
+    metadata = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "india_videos": len(india),
+        "world_videos": len(world),
+        "api_errors": errors,
+        "openrouter_used": bool(llm),
+        "top_idea": top,
+    }
+    return report, metadata
 
 
-# ============================================================
-# MAIN
-# ============================================================
+def save_outputs(report: str, metadata: Dict[str, Any]) -> Tuple[Path, Path]:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    md_path = OUTPUT_DIR / "youtube_idea_report.md"
+    json_path = OUTPUT_DIR / "youtube_idea_report.json"
+    md_path.write_text(report, encoding="utf-8")
+    json_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    return md_path, json_path
 
-def main():
 
+def main() -> int:
     print("=" * 70)
-
-    print(
-        "YOUTUBE HIGH CTR IDEA GENERATOR"
-    )
-
+    print("YOUTUBE HIGH CTR IDEA GENERATOR")
     print("=" * 70)
-
-    print(
-        "Starting..."
-    )
-
-    # --------------------------------------------------------
-    # 1. YOUTUBE
-    # --------------------------------------------------------
-
-    print()
-    print(
-        "[1/5] Collecting YouTube data..."
-    )
-
-    videos, errors = (
-        collect_youtube_data()
-    )
-
-    if not videos:
-
-        print(
-            "[FATAL] "
-            "No YouTube videos collected."
-        )
-
+    print("Collecting India + World YouTube data...")
+    india, world, errors = collect_data()
+    if not india and not world:
+        print("[FATAL] YouTube data collection failed completely.")
+        for k, v in errors.items():
+            print(f"  {k}: {v}")
         return 1
 
-    print(
-        f"Collected {len(videos)} "
-        "unique videos."
-    )
+    print(f"[OK] India videos: {len(india)}")
+    print(f"[OK] World videos: {len(world)}")
+    if errors:
+        print(f"[WARN] Partial region failures: {', '.join(errors)}")
 
-    # --------------------------------------------------------
-    # 2. LOCAL IDEAS
-    # --------------------------------------------------------
-
-    print()
-    print(
-        "[2/5] Building local creative fallback..."
-    )
-
-    local_ideas = (
-        build_local_ideas()
-    )
-
-    # --------------------------------------------------------
-    # 3. OPENROUTER
-    # --------------------------------------------------------
-
-    print()
-    print(
-        "[3/5] Generating premium ideas..."
-    )
-
-    ai_data = (
-        generate_ai_ideas(
-            videos
-        )
-    )
-
-    if ai_data:
-
-        ideas = validate_ai_output(
-            ai_data,
-            local_ideas
-        )
-
-        mode = (
-            "OpenRouter + validation"
-        )
-
-    else:
-
-        ideas = local_ideas
-
-        # Local high CTR idea
-        ideas[
-            "high_ctr"
-        ] = {
-
-            "title":
-                "The One Detail That Changes the Entire Story",
-
-            "logline":
-                "Andaru normal incident ani anukunna oka small detail ni protagonist serious ga investigate chestadu; aa detail follow chestu vellaga story motham completely different meaning pondutundi.",
-
-            "concept":
-                "Start with a visual clue that looks insignificant. Turn it into an investigation with escalating discoveries and finish with a reveal that makes the audience rethink the opening.",
-
-            "why_it_works":
-                "Strong curiosity gap, clear investigation engine, visual clues, escalation and a payoff that recontextualizes the opening.",
-
-            "editorial_score":
-                9.2
-        }
-
-        mode = (
-            "Local deterministic fallback"
-        )
-
-    print(
-        f"Generation mode: {mode}"
-    )
-
-    # --------------------------------------------------------
-    # 4. REPORT
-    # --------------------------------------------------------
-
-    print()
-    print(
-        "[4/5] Creating report..."
-    )
-
-    markdown = build_report(
-        videos,
-        ideas,
-        errors
-    )
-
-    timestamp = datetime.now().strftime(
-        "%Y%m%d_%H%M%S"
-    )
-
-    md_path = (
-        OUTPUT_DIR
-        / f"youtube_ideas_{timestamp}.md"
-    )
-
-    json_path = (
-        OUTPUT_DIR
-        / f"youtube_ideas_{timestamp}.json"
-    )
-
-    pdf_path = (
-        OUTPUT_DIR
-        / f"youtube_ideas_{timestamp}.pdf"
-    )
-
-    md_path.write_text(
-        markdown,
-        encoding="utf-8"
-    )
-
-    save_json(
-        videos,
-        ideas,
-        errors,
-        json_path
-    )
-
-    create_pdf(
-        markdown,
-        pdf_path
-    )
-
-    # --------------------------------------------------------
-    # 5. FINISH
-    # --------------------------------------------------------
-
-    print()
-    print(
-        "[5/5] Finished."
-    )
-
-    print()
-    print("=" * 70)
-
-    print(
-        "SUCCESS"
-    )
-
-    print("=" * 70)
-
-    print(
-        f"Markdown: {md_path}"
-    )
-
-    print(
-        f"JSON:     {json_path}"
-    )
-
-    print(
-        f"PDF:      {pdf_path}"
-    )
-
-    print("=" * 70)
-
+    report, metadata = build_report(india, world, errors)
+    md_path, json_path = save_outputs(report, metadata)
+    print(f"[OK] Markdown: {md_path}")
+    print(f"[OK] JSON: {json_path}")
+    print(f"[OK] HIGH CTR IDEA: {metadata['top_idea'].get('title')}")
     return 0
 
 
 if __name__ == "__main__":
-
-    raise SystemExit(
-        main()
-    )
-````
+    raise SystemExit(main())

@@ -1,708 +1,398 @@
-"""
-Robust YouTube High-CTR Idea Generator
-- Fixes OpenRouter 402 caused by requesting 30,000 max_tokens.
-- Uses a small OpenRouter request only when useful.
-- Falls back to deterministic local ideas when AI credits are unavailable.
-- Keeps generate_report() and render_report() compatible with a typical app.py import.
-- Does not require an LLM for the report to be generated.
-"""
-
 from __future__ import annotations
 
 import json
 import os
 import re
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import requests
 
-
-# -----------------------------
-# Configuration
-# -----------------------------
-
-IDEAS_PER_SECTION = int(os.getenv("IDEAS_PER_SECTION", "8"))
-OPENROUTER_MODEL = os.getenv(
-    "OPENROUTER_MODEL",
-    "openai/gpt-oss-20b:free",
-)
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-
-# IMPORTANT:
-# The old program requested 30000 tokens and OpenRouter rejected it.
-# Keep this small. If your remaining balance is very low, the local
-# fallback below will still produce a complete report.
-OPENROUTER_MAX_TOKENS = int(os.getenv("OPENROUTER_MAX_TOKENS", "700"))
-OPENROUTER_TIMEOUT = int(os.getenv("OPENROUTER_TIMEOUT", "45"))
-
-OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "output"))
+OUTPUT_DIR = Path(os.getenv('OUTPUT_DIR', 'output'))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
+IDEAS_PER_SECTION = max(4, min(int(os.getenv('IDEAS_PER_SECTION', '8')), 8))
+OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+OPENROUTER_MODEL = os.getenv('OPENROUTER_MODEL', 'openai/gpt-oss-20b:free')
+# The old code requested 30,000 tokens and got HTTP 402. Never do that here.
+OPENROUTER_MAX_TOKENS = max(250, min(int(os.getenv('OPENROUTER_MAX_TOKENS', '700')), 700))
+USE_OPENROUTER = os.getenv('USE_OPENROUTER', 'false').lower() in {'1','true','yes','on'}
 
 SECTIONS = [
-    ("India YouTube Trends", "india_trends"),
-    ("World YouTube Trends", "world_trends"),
-    ("YouTube Genre Trends", "genre_trends"),
-    ("Trend-Based Shorts Ideas", "trend_shorts"),
-    ("Trend-Based Longform Ideas", "trend_longform"),
-    ("General India and World Shorts Ideas", "general_shorts"),
-    ("General India and World Longform Ideas", "general_longform"),
-    ("Genre-Fusion High-CTR Ideas", "genre_fusion"),
+    ('india_trends', '1. India YouTube Trends'),
+    ('world_trends', '2. World YouTube Trends'),
+    ('genre_trends', '3. YouTube Genre Trends'),
+    ('trend_shorts', '4. Trend-Based Shorts Ideas'),
+    ('trend_longform', '5. Trend-Based Longform Ideas'),
+    ('general_shorts', '6. General India + World Shorts Ideas'),
+    ('general_longform', '7. General India + World Longform Ideas'),
+    ('genre_fusion', '8. Genre-Fusion High-CTR Ideas'),
+]
+
+GENRE_WORDS = {
+    'Thriller': ['thriller','suspense','mystery','secret','hidden','missing','unknown','dark'],
+    'Crime': ['crime','criminal','murder','robbery','police','case','investigation','scam','fraud'],
+    'Comedy': ['comedy','funny','prank','reaction','fun'],
+    'Horror': ['horror','ghost','haunted','scary','demon','fear'],
+    'Romance': ['love','romance','couple','relationship','wedding'],
+    'Action': ['action','fight','war','battle','chase'],
+    'Gaming': ['minecraft','gta','gaming','gameplay','fortnite','roblox','game'],
+    'Technology': ['ai','technology','tech','phone','iphone','android','app','robot'],
+    'Challenge': ['challenge','24 hours','experiment','testing','tried'],
+}
+
+
+def clean(v: Any) -> str:
+    if v is None: return ''
+    if isinstance(v, str): return re.sub(r'\s+', ' ', v).strip()
+    return str(v).strip()
+
+
+def num(v: Any, default=0) -> int:
+    try: return int(float(v))
+    except (TypeError, ValueError): return default
+
+
+def video_title(x: Any) -> str:
+    if isinstance(x, str): return clean(x)
+    if not isinstance(x, dict): return ''
+    for k in ('title','video_title','name','videoTitle','snippet_title'):
+        if clean(x.get(k)): return clean(x[k])
+    return ''
+
+
+def video_url(x: Any) -> str:
+    if not isinstance(x, dict): return ''
+    for k in ('url','video_url','watch_url','link','webpage_url'):
+        u = clean(x.get(k))
+        if u.startswith(('http://','https://')): return u
+    vid = x.get('videoId') or x.get('video_id') or x.get('id')
+    return f'https://www.youtube.com/watch?v={vid}' if vid else ''
+
+
+def extract_videos(data: Any, limit=80) -> list[dict[str, str]]:
+    out, seen = [], set()
+    def walk(x):
+        if len(out) >= limit: return
+        if isinstance(x, dict):
+            t = video_title(x)
+            if t and t.lower() not in seen:
+                seen.add(t.lower())
+                out.append({'title': t[:220], 'url': video_url(x)})
+            for v in x.values():
+                if isinstance(v, (dict,list,tuple)): walk(v)
+        elif isinstance(x, (list,tuple)):
+            for v in x:
+                walk(v)
+                if len(out) >= limit: return
+    walk(data)
+    return out
+
+
+def extract_trends(data: Any, limit=50) -> list[dict[str, Any]]:
+    out, seen = [], set()
+    def walk(x):
+        if len(out) >= limit: return
+        if isinstance(x, dict):
+            t = clean(x.get('trend') or x.get('topic') or x.get('keyword') or x.get('query'))
+            signal = any(k in x for k in ('mentions','combined_views','avg_views','total_views','count','subgenre','category'))
+            if t and signal:
+                key = (t.lower(), clean(x.get('subgenre') or x.get('genre')).lower())
+                if key not in seen:
+                    seen.add(key)
+                    out.append({
+                        'trend': t[:180],
+                        'mentions': num(x.get('mentions') or x.get('count')),
+                        'combined_views': num(x.get('combined_views') or x.get('total_views') or x.get('views')),
+                        'avg_views': num(x.get('avg_views') or x.get('average_views')),
+                        'category': clean(x.get('category') or x.get('category_name')),
+                        'subgenre': clean(x.get('subgenre') or x.get('genre') or x.get('subcategory')),
+                    })
+            for v in x.values():
+                if isinstance(v,(dict,list,tuple)): walk(v)
+        elif isinstance(x,(list,tuple)):
+            for v in x:
+                walk(v)
+                if len(out) >= limit: return
+    walk(data)
+    out.sort(key=lambda z:(z['combined_views'],z['mentions'],z['avg_views']), reverse=True)
+    return out
+
+
+def infer_genre(trend: dict[str, Any]) -> str:
+    explicit = clean(trend.get('subgenre') or trend.get('genre'))
+    if explicit and explicit.lower() not in {'entertainment','movies & entertainment','general','other'}:
+        return explicit
+    text = f"{trend.get('trend','')} {trend.get('category','')}".lower()
+    scores = Counter()
+    for genre, words in GENRE_WORDS.items():
+        for word in words:
+            if word in text: scores[genre] += 1
+    return scores.most_common(1)[0][0] if scores else 'Entertainment'
+
+
+def stats(t: dict[str, Any]) -> str:
+    p=[]
+    if t.get('mentions'): p.append(f"{t['mentions']} detected videos")
+    if t.get('combined_views'): p.append(f"{t['combined_views']:,} combined views")
+    if t.get('avg_views'): p.append(f"{t['avg_views']:,} average views")
+    return ' | '.join(p) or 'trend signal detected'
+
+
+def sources(t: dict[str, Any], videos: list[dict[str,str]]) -> list[dict[str,str]]:
+    words=[w.lower() for w in re.findall(r'[A-Za-z0-9]+',t['trend']) if len(w)>3]
+    out=[]
+    for v in videos:
+        if words and any(w in v['title'].lower() for w in words):
+            out.append(v)
+        if len(out)>=3: break
+    return out
+
+
+def trend_reason(t: dict[str,Any], region: str) -> str:
+    g=infer_genre(t); name=t['trend']
+    reasons={
+      'Thriller':'unanswered questions and delayed answers naturally create retention because viewers want the next clue.',
+      'Crime':'the viewer becomes a detective: evidence, suspects, contradictions and a final answer create participation.',
+      'Mystery':'the strongest mechanism is a solvable question where the audience can form a theory before the reveal.',
+      'Comedy':'the click comes from a simple premise with an unpredictable consequence, not from random jokes.',
+      'Horror':'anticipation plus uncertainty keeps viewers waiting for the exact moment the threat becomes clear.',
+      'Gaming':'gameplay becomes stronger when there is a mission, rule, consequence or mystery instead of raw gameplay.',
+      'Technology':'the best angle is an unexpected result from a familiar tool, creating a test the viewer wants to see finished.',
+      'Challenge':'a clear rule and measurable outcome give the audience a reason to stay until the result.',
+    }
+    base=reasons.get(g,'the topic has audience attention, but the creator opportunity is to turn it into a specific question, conflict or transformation.')
+    return f"{region} trend: {name}. {base} The opportunity is to build a story around the trend rather than simply report it. Signal: {stats(t)}."
+
+
+def idea(rank,title,hook,premise,genre,fmt,structure,why,trend_basis='',src=None,region='India + World'):
+    steps=[x.strip() for x in structure.split('→') if x.strip()]
+    payoff=steps[-1] if steps else 'the final reveal'
+    return {
+      'rank':rank,'high_ctr_idea':title,'title':title,'hook':hook,'format':fmt,'genre':genre,'region':region,
+      'why_people_will_click':why,'story_premise':premise,'story_engine':' → '.join(steps),
+      'first_15_seconds':f"0–3 sec: {hook} 3–8 sec: establish the unanswered question. 8–15 sec: reveal the first piece of evidence without explaining it.",
+      'escalation':' → '.join(steps),'payoff':payoff,
+      'thumbnail_concept':'One face/emotion + one impossible visual clue + 2–4 curiosity words. Do not repeat the title.',
+      'logline_roman_telugu':(
+          f"Start lo {premise.lower()} ani audience ki anipistundi. Kani madhyalo oka strong clue dorukutundi; dani valla {genre.lower()} angle lo asalu problem vere laga kanipistundi. Prathi step tho tension perigela clues ivvali, audience kuda answer guess cheyyali. Last lo {payoff.lower()} reveal ayyaka opening lo unna small detail ki kotha meaning vastundi — ade satisfying payoff."
+      ),
+      'trend_basis':trend_basis or 'Original concept','source_videos':src or [],
+      'ctr_score':9.0 if any(w in title.lower() for w in ['nobody','wrong','impossible','one','last','before','why','secret','missing']) else 8.7,
+    }
+
+
+SHORT_BLUEPRINTS=[
+ ('The Trend Is Not What You Think — Watch The Last 5 Seconds','Start with the familiar trend, then expose one detail that changes its meaning.','familiar trend → overlooked clue → contradiction → reveal'),
+ ('Everyone Saw This. Almost Nobody Noticed The Real Clue.','Make one tiny visual detail the key to a much bigger question.','observation → clue → false theory → proof → reveal'),
+ ('I Tried The Trend Once. Then The Unexpected Thing Happened.','The trend is only the setup; the unexpected consequence is the actual story.','attempt → failure → consequence → escalation → payoff'),
+ ('You Get One Guess Before I Reveal What Really Happened','Give the viewer enough evidence to form a theory, then destroy the obvious answer.','question → 2 clues → audience guess → contradiction → reveal'),
+ ('The Last 3 Seconds Change Everything You Just Watched','Plant a clue early that becomes meaningful only after the ending.','normal scene → strange detail → escalation → final reversal'),
+ ('I Found The One Detail Everyone Else Ignored','Turn an overlooked detail from the current topic into a mini investigation.','detail → why it matters → evidence → reveal'),
+ ('I Thought I Knew Why This Was Trending. I Was Wrong.','Start with the obvious explanation and prove why it is incomplete.','assumption → test → contradiction → new answer'),
+ ('One Rule. One Attempt. If I Fail, The Video Ends.','A strict rule creates immediate stakes and makes every action meaningful.','rule → temptation → near failure → final attempt → result'),
+]
+
+LONG_BLUEPRINTS=[
+ ('The Trend Everyone Is Copying Has One Problem Nobody Talks About','Investigate the hidden weakness behind the popular format and prove it with examples.','popular belief → evidence → test → failure → conclusion'),
+ ('Why This Trend Exploded — The Real Reason Is Not What You Think','Find the emotional or structural reason behind the spike and test the theory.','trend → obvious reason → competing theory → evidence → verdict'),
+ ('I Tried To Recreate The Trend Under One Impossible Rule','Make the audience wait for a measurable final result.','goal → rule → attempt 1 → failure → escalation → final attempt → result'),
+ ('I Found A Mystery Hidden Inside A Viral Trend','Use the trend as evidence in a story the audience can solve with you.','question → clue 1 → false lead → clue 2 → contradiction → reveal'),
+ ('What If The Trend Is Popular For The Wrong Reason?','Challenge the obvious explanation and build a stronger explanation from evidence.','popular explanation → alternative theory → tests → proof → payoff'),
+ ('I Built A Video Around The One Detail Everyone Ignores','Turn a small overlooked detail into the central mystery of the episode.','ignored detail → why ignored → evidence → escalation → payoff'),
+ ('I Tried To Predict What Would Happen Before The Trend Did','Make a prediction early, then spend the video trying to prove or destroy it.','prediction → clues → tests → near-proof → final result'),
+ ('The Trend Looks Simple. Recreating It Was Not.','A production challenge with visible failures and a final comparison.','simple promise → preparation → failures → breakthrough → result'),
+]
+
+GENERAL_SHORTS=[
+ ('My Camera Recorded Something I Never Saw','A solo creator notices one impossible-looking detail in yesterday’s footage.','normal footage → strange frame → investigation → reveal','Psychological Thriller'),
+ ('Someone Sent Me A Photo Taken From Inside My Room','An impossible photo creates a question about when and how it was taken.','message → photo → timestamp → physical clue → reveal','Mystery Thriller'),
+ ('The Message Arrived Before I Did','A message appears to predict an action seconds before it happens.','message → prediction → test → pattern → twist','Psychological Thriller'),
+ ('I Found My Own Missing Video On A Stranger’s Phone','A missing file becomes a physical mystery with a final explanation.','missing file → discovery → contradiction → clue → payoff','Tech Mystery'),
+ ('The Lift Stopped On A Floor That Does Not Exist','A normal location becomes a mystery through one impossible event.','routine → impossible event → exploration → clue → reveal','Mystery Thriller'),
+ ('I Heard Tomorrow’s News Tonight','A fictional future recording contains a detail that appears moments later.','recording → prediction → verification → escalation → reveal','Psychological Thriller'),
+ ('The Same Stranger Appeared In Every Video','A repeated background figure turns unrelated footage into one connected mystery.','observation → repeated figure → pattern → investigation → reveal','Mystery'),
+ ('I Deleted The File. It Came Back With A New Timestamp.','A digital glitch becomes evidence of a bigger mystery.','deletion → return → timestamp → physical clue → payoff','Tech Thriller'),
+]
+
+GENERAL_LONG=[
+ ('I Tried To Solve A Mystery Using Only What My Camera Saw','Investigate a staged mystery using only existing footage while the audience gets the evidence too.','Crime-Mystery'),
+ ('I Had 8 Minutes To Prove Someone Was Lying','One claim, three pieces of evidence and a final contradiction drive the story.','Psychological Thriller'),
+ ('I Followed A Set Of Instructions I Found In My Own Room','Each harmless instruction creates the next clue until the original source is revealed.','Mystery Thriller'),
+ ('I Made A Mystery Where The Audience Gets The Answer First','Show the crucial clue early, then make viewers doubt what they saw.','Mystery'),
+ ('I Tried To Reconstruct A Missing 10 Minutes','Timestamps, objects and inconsistencies reconstruct an unexplained gap.','Psychological Mystery'),
+ ('Every Clue Pointed To The Wrong Person','The obvious suspect looks guilty until one final clue changes the timeline.','Crime-Mystery'),
+ ('I Turned One Ordinary Night Into A Crime Investigation','An everyday event gradually becomes a case with evidence and a reveal.','Crime-Thriller'),
+ ('I Tested Whether A Stranger Could Predict My Next Move','A controlled prediction experiment escalates until one result cannot be easily explained.','Psychological Thriller'),
+]
+
+FUSIONS=[
+ ('Thriller + Comedy','A funny character accidentally becomes the only person who notices a serious clue.','Comedy misdirection → real clue → danger → reveal','The emotional switch from laughter to genuine stakes creates novelty.'),
+ ('Crime + Technology','A tiny digital inconsistency becomes the clue that exposes the entire timeline.','digital clue → false explanation → evidence → reveal','Technology gives the crime story a concrete evidence trail.'),
+ ('Mystery + Challenge','The creator has a strict countdown while solving clues the audience can also see.','countdown → clues → false lead → final clue → reveal','The countdown adds pressure while the mystery makes viewers participate.'),
+ ('Psychological Thriller + Comedy','A harmless joke becomes disturbing when the same prediction keeps coming true.','joke → coincidence → test → pattern → payoff','The genre switch creates surprise without needing expensive production.'),
+ ('Horror + Technology','A familiar phone feature becomes the mechanism for discovering something impossible.','normal feature → anomaly → investigation → reveal','The familiar technology makes the impossible event feel close to the viewer.'),
+ ('Gaming + Thriller','A game event begins appearing outside the game through connected clues.','game clue → real clue → escalation → connection → reveal','The virtual/real boundary creates a strong curiosity gap.'),
+ ('Crime + Comedy','The person everyone ignores solves the case because they notice what experts dismiss.','comic observation → serious clue → mistaken theory → solution','Comedy gives the character an unusual way of seeing the evidence.'),
+ ('Mystery + Technology','An ordinary app appears to know something it could not know.','prediction → test → impossible result → investigation → reveal','The app becomes a story engine rather than a gimmick.'),
 ]
 
 
-# -----------------------------
-# Small helpers
-# -----------------------------
-
-def _clean_text(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value.strip()
-    return str(value).strip()
-
-
-def _video_title(video: Any) -> str:
-    if isinstance(video, dict):
-        for key in ("title", "video_title", "name"):
-            if video.get(key):
-                return _clean_text(video[key])
-    return _clean_text(video)
-
-
-def _video_url(video: Any) -> str:
-    if not isinstance(video, dict):
-        return ""
-
-    for key in ("url", "video_url", "watch_url", "link"):
-        value = video.get(key)
-        if value:
-            return _clean_text(value)
-
-    video_id = video.get("videoId") or video.get("video_id") or video.get("id")
-    if isinstance(video_id, str) and video_id:
-        return f"https://www.youtube.com/watch?v={video_id}"
-
-    return ""
-
-
-def _compact_videos(videos: Any, limit: int = 25) -> list[dict[str, str]]:
-    """Turn many possible YouTube API structures into a small prompt dataset."""
-    if videos is None:
-        return []
-
-    if isinstance(videos, dict):
-        for key in ("videos", "items", "data", "results"):
-            if isinstance(videos.get(key), list):
-                videos = videos[key]
-                break
-        else:
-            videos = [videos]
-
-    if not isinstance(videos, (list, tuple)):
-        return []
-
-    result = []
-    seen = set()
-
-    for item in videos:
-        title = _video_title(item)
-        if not title or title.lower() in seen:
-            continue
-
-        seen.add(title.lower())
-        result.append(
-            {
-                "title": title[:180],
-                "url": _video_url(item),
-            }
-        )
-
-        if len(result) >= limit:
-            break
-
-    return result
-
-
-def _extract_json(text: str) -> Any:
-    """Accept clean JSON, fenced JSON, or JSON embedded in prose."""
-    if not text:
-        return None
-
-    text = text.strip()
-
-    # Remove markdown fences.
-    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
-    text = re.sub(r"\s*```$", "", text)
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Find the first JSON object/array.
-    candidates = []
-    first_obj = text.find("{")
-    first_arr = text.find("[")
-    if first_obj >= 0:
-        candidates.append(first_obj)
-    if first_arr >= 0:
-        candidates.append(first_arr)
-
-    if not candidates:
-        return None
-
-    start = min(candidates)
-
-    # Try progressively shorter endings.
-    for end in range(len(text), start + 1, -1):
-        candidate = text[start:end].strip()
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-
-    return None
-
-
-# -----------------------------
-# OpenRouter
-# -----------------------------
-
-def _openrouter_key() -> str:
-    return (
-        os.getenv("OPENROUTER_API_KEY")
-        or os.getenv("OPENROUTER_KEY")
-        or ""
-    ).strip()
-
-
-def _openrouter_generate(prompt: str) -> Any:
-    """
-    One deliberately small request.
-
-    The old code requested 30000 output tokens. This implementation never
-    does that. A 402/401/429/5xx error is treated as an unavailable AI
-    provider and the local generator takes over.
-    """
-    api_key = _openrouter_key()
-    if not api_key:
-        return None
-
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a concise YouTube trend analyst. "
-                    "Return valid JSON only. Never use markdown fences."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0.85,
-        "max_tokens": max(250, min(OPENROUTER_MAX_TOKENS, 700)),
-    }
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/",
-        "X-Title": "YouTube High CTR Idea Generator",
-    }
-
-    try:
-        response = requests.post(
-            OPENROUTER_URL,
-            headers=headers,
-            json=payload,
-            timeout=OPENROUTER_TIMEOUT,
-        )
-
-        if response.status_code != 200:
-            # Do not crash the entire report because of provider credits.
-            print(
-                f"[WARN] OpenRouter unavailable: HTTP {response.status_code}. "
-                "Using local fallback."
-            )
-            return None
-
-        data = response.json()
-        choices = data.get("choices") or []
-        if not choices:
-            return None
-
-        message = choices[0].get("message") or {}
-        content = message.get("content", "")
-        return _extract_json(content)
-
-    except requests.RequestException as exc:
-        print(f"[WARN] OpenRouter request failed: {exc}")
-        return None
-    except (ValueError, TypeError, KeyError) as exc:
-        print(f"[WARN] OpenRouter response parse failed: {exc}")
-        return None
-
-
-# -----------------------------
-# Local fallback
-# -----------------------------
-
-GENRES = [
-    "Thriller",
-    "Crime",
-    "Comedy",
-    "Mystery",
-    "Psychological Thriller",
-    "Horror",
-    "Tech Mystery",
-]
-
-
-def _trend_names(videos: list[dict[str, str]], limit: int = 5) -> list[str]:
-    return [v["title"] for v in videos[:limit] if v.get("title")]
-
-
-def _local_ideas(section_key: str, videos: list[dict[str, str]], count: int) -> list[dict[str, Any]]:
-    trends = _trend_names(videos)
-    trend_a = trends[0] if trends else "today's biggest YouTube trend"
-    trend_b = trends[1] if len(trends) > 1 else "a surprising internet trend"
-
-    templates: dict[str, list[tuple[str, str, str]]] = {
-        "india_trends": [
-            ("India Trend Test: {a} Ni Real Life Lo Try Chesthe?",
-             "Trending format ni Telugu creator angle lo test chesi unexpected result reveal cheyyadam.",
-             "Trend + curiosity + payoff"),
-            ("{a} Venaka Unna Real Reason Enti?",
-             "Trending topic ni surface-level ga kakunda mystery/reason angle lo break cheyyadam.",
-             "Curiosity gap"),
-            ("India Lo Andaru Discuss Chestunna {a} — But Nobody Asked This",
-             "Popular topic lo overlooked question ni investigate cheyyadam.",
-             "Contrarian hook"),
-            ("{b} Ni 24 Hours Follow Chesthe Em Jaruguthundi?",
-             "Trend ni challenge format lo convert chesi measurable result chupinchadam.",
-             "Challenge + result"),
-        ],
-        "world_trends": [
-            ("Why The World Is Suddenly Obsessed With {a}",
-             "Global trend ni Telugu audience ki simple story format lo explain cheyyadam.",
-             "Global curiosity"),
-            ("I Tried The Internet's {a} Trend So You Don't Have To",
-             "Popular global format ni creator experiment ga transform cheyyadam.",
-             "Experiment"),
-            ("The Strange Reason {a} Became Huge",
-             "Trend rise ki possible cultural/format reasons ni explain cheyyadam.",
-             "Why-now hook"),
-            ("{b}: Global Trend Or Just Internet Hype?",
-             "Trend longevity ni challenge chese analysis.",
-             "Debate"),
-        ],
-        "genre_trends": [
-            ("The New Telugu Thriller Formula Everyone Is Copying",
-             "Thriller pacing, mystery reveals and cliffhangers ni creator-friendly format lo analyse cheyyadam.",
-             "Thriller"),
-            ("Crime + Comedy Is Getting More Addictive — Here's Why",
-             "Crime stakes ni comedy timing tho combine chese format explain cheyyadam.",
-             "Crime-Comedy"),
-            ("Psychological Thriller Videos: The Hook That Makes People Stay",
-             "First 20 seconds lo unanswered question create cheyyadam.",
-             "Psychological Thriller"),
-            ("Mystery Videos Without Expensive Production",
-             "Low-budget locations tho mystery tension build cheyyadam.",
-             "Mystery"),
-        ],
-        "trend_shorts": [
-            ("You Have 15 Seconds To Find The Hidden Clue",
-             "Fast visual mystery with one hidden clue and replay-friendly ending.",
-             "Mystery"),
-            ("Everyone Misses This Detail In {a}",
-             "One visual clue ni highlight chesi comments lo answer adagadham.",
-             "Curiosity"),
-            ("Wait For The Last 3 Seconds...",
-             "Delayed reveal structure with a strong payoff.",
-             "Retention"),
-            ("I Tested The Viral {b} Trick",
-             "Quick experiment with a clear result.",
-             "Experiment"),
-        ],
-        "trend_longform": [
-            ("I Spent 24 Hours Inside The {a} Trend",
-             "8–10 minute challenge: setup → rules → failures → final result.",
-             "Challenge"),
-            ("The Mystery Behind {a}: What Nobody Is Talking About",
-             "8–10 minute investigation built around clues and a final explanation.",
-             "Mystery"),
-            ("I Recreated The Internet's {b} Trend With ₹500",
-             "Budget challenge with escalating failures and final comparison.",
-             "Experiment"),
-            ("Why This Trend Exploded — And How It Could Die",
-             "Trend lifecycle explained through story, examples and creator lessons.",
-             "Analysis"),
-        ],
-        "general_shorts": [
-            ("The Door Was Locked… But Something Was Moving Inside",
-             "Solo suspense short with sound design and a final visual reveal.",
-             "Thriller"),
-            ("My Phone Recorded Something I Didn't See",
-             "Found-footage style mystery designed around a replayable clue.",
-             "Mystery"),
-            ("I Heard My Own Voice From The Next Room",
-             "Solo crime-thriller setup with a final explanation twist.",
-             "Psychological Thriller"),
-            ("The 10-Second Rule Nobody Should Break",
-             "Simple rule-based story that escalates into a twist.",
-             "Horror"),
-        ],
-        "general_longform": [
-            ("I Followed A Stranger's Routine For 24 Hours",
-             "Solo experiment that slowly turns into a mystery.",
-             "Psychological Thriller"),
-            ("I Tried To Solve A Crime With Only 5 Clues",
-             "Audience gets the clues before the final reveal.",
-             "Crime-Mystery"),
-            ("I Turned My Room Into A Mystery Game",
-             "Low-budget production with clues, false leads and a final reveal.",
-             "Mystery"),
-            ("I Spent One Night Following The Weirdest Internet Rule",
-             "Story-first challenge with escalating consequences.",
-             "Thriller"),
-        ],
-        "genre_fusion": [
-            ("Crime-Comedy: The Worst Detective Solves A Serious Case",
-             "Comedy character inside a genuine mystery so the stakes remain real.",
-             "Crime + Comedy"),
-            ("Thriller + Minecraft: The World Changes Every Night",
-             "Solo gaming narrative where each night reveals a new real-world clue.",
-             "Thriller + Gaming"),
-            ("Comedy + Psychological Thriller: My App Knows My Next Move",
-             "Funny setup gradually becomes unsettling when predictions come true.",
-             "Comedy + Psychological Thriller"),
-            ("Mystery + Challenge: 8 Clues, 1 Room, 10 Minutes",
-             "Audience can solve the mystery alongside the creator.",
-             "Mystery + Challenge"),
-        ],
-    }
-
-    base = templates.get(section_key, templates["general_shorts"])
-    output = []
-
-    for i in range(count):
-        title, logline, genre = base[i % len(base)]
-
-        title = title.format(a=trend_a, b=trend_b)
-
-        output.append(
-            {
-                "rank": i + 1,
-                "title": title,
-                "format": (
-                    "Shorts"
-                    if "shorts" in section_key
-                    else "Longform 8–10 min"
-                ),
-                "genre": genre,
-                "why_it_can_work": (
-                    "Strong curiosity gap, simple premise, clear escalation, "
-                    "and a payoff that can be understood from the title/thumbnail."
-                ),
-                "logline_roman_telugu": (
-                    "Oka simple setup tho start ayyi, clues/escalation tho tension "
-                    "perigi, last lo unexpected reveal tho payoff ivvali. "
-                    + logline
-                ),
-                "trend_reference": trend_a if trends else "Evergreen concept",
-            }
-        )
-
-    return output
-
-
-def _normalize_ai_ideas(data: Any, count: int) -> list[dict[str, Any]]:
-    if isinstance(data, dict):
-        for key in ("ideas", "items", "results", "high_ctr_ideas"):
-            if isinstance(data.get(key), list):
-                data = data[key]
-                break
-
-    if not isinstance(data, list):
-        return []
-
-    result = []
-    for i, item in enumerate(data[:count], start=1):
-        if isinstance(item, str):
-            result.append(
-                {
-                    "rank": i,
-                    "title": item.strip(),
-                    "format": "",
-                    "genre": "",
-                    "why_it_can_work": "",
-                    "logline_roman_telugu": "",
-                    "trend_reference": "",
-                }
-            )
-        elif isinstance(item, dict):
-            title = (
-                item.get("title")
-                or item.get("idea")
-                or item.get("headline")
-            )
-            if not title:
-                continue
-
-            result.append(
-                {
-                    "rank": i,
-                    "title": _clean_text(title),
-                    "format": _clean_text(item.get("format")),
-                    "genre": _clean_text(item.get("genre")),
-                    "why_it_can_work": _clean_text(
-                        item.get("why_it_can_work")
-                        or item.get("why")
-                        or item.get("reason")
-                    ),
-                    "logline_roman_telugu": _clean_text(
-                        item.get("logline_roman_telugu")
-                        or item.get("logline")
-                    ),
-                    "trend_reference": _clean_text(
-                        item.get("trend_reference")
-                        or item.get("source_video")
-                    ),
-                }
-            )
-
-    return result
-
-
-def _generate_section(section_key: str, videos: list[dict[str, str]], count: int) -> list[dict[str, Any]]:
-    """
-    Try one compact AI call. If the account cannot afford it, immediately
-    use local ideas. This prevents 8 sections from repeatedly generating
-    the same HTTP 402 error.
-    """
-    compact = json.dumps(videos[:12], ensure_ascii=False)
-
-    prompt = f"""
-Create exactly {min(count, 4)} high-CTR YouTube ideas for section "{section_key}".
-
-Input trend videos:
-{compact}
-
-Rules:
-- Telugu creator audience.
-- Ideas must be practical for a solo creator.
-- Avoid generic/silly ideas.
-- For entertainment, explicitly name the genre.
-- Shorts should be fast and replayable.
-- Longform means 8–10 minutes.
-- Include a Roman Telugu logline.
-- Return ONLY this JSON:
-{{
-  "ideas": [
-    {{
-      "title": "...",
-      "format": "...",
-      "genre": "...",
-      "why_it_can_work": "...",
-      "logline_roman_telugu": "...",
-      "trend_reference": "..."
-    }}
-  ]
-}}
-"""
-
-    ai_data = _openrouter_generate(prompt)
-    ideas = _normalize_ai_ideas(ai_data, min(count, 4))
-
-    # Always fill the complete requested count locally.
-    local = _local_ideas(section_key, videos, count)
-
-    used = {x["title"].lower() for x in ideas}
-    for item in local:
-        if len(ideas) >= count:
-            break
-        if item["title"].lower() not in used:
-            item["rank"] = len(ideas) + 1
-            ideas.append(item)
-            used.add(item["title"].lower())
-
-    for i, item in enumerate(ideas, start=1):
-        item["rank"] = i
-
-    return ideas[:count]
-
-
-# -----------------------------
-# Public API expected by app.py
-# -----------------------------
-
-def generate_report(*args, **kwargs) -> dict[str, Any]:
-    """
-    Flexible public function.
-
-    It accepts positional/keyword arguments from older versions of the
-    project so app.py does not have to be rewritten just because the
-    generator was fixed.
-
-    Recognized inputs:
-      - india_videos
-      - world_videos
-      - videos / data / trend_data
-      - ideas_per_section
-    """
-    count = int(
-        kwargs.get("ideas_per_section")
-        or kwargs.get("num_ideas")
-        or IDEAS_PER_SECTION
-    )
-    count = max(1, min(count, 8))
-
-    india_videos = kwargs.get("india_videos")
-    world_videos = kwargs.get("world_videos")
-
-    # Positional compatibility.
-    if india_videos is None and len(args) >= 1:
-        india_videos = args[0]
-    if world_videos is None and len(args) >= 2:
-        world_videos = args[1]
-
-    if india_videos is None:
-        india_videos = kwargs.get("videos") or kwargs.get("data") or kwargs.get("trend_data")
-    if world_videos is None:
-        world_videos = kwargs.get("world") or kwargs.get("world_data")
-
-    india = _compact_videos(india_videos, 25)
-    world = _compact_videos(world_videos, 25)
-
-    # If only one dataset was supplied, use it as a general trend pool.
-    if not world:
-        world = list(india)
-    if not india:
-        india = list(world)
-
-    report = {
-        "title": "YOUTUBE HIGH CTR IDEA GENERATOR",
-        "generated_at": datetime.now(timezone.utc).astimezone().isoformat(),
-        "ideas_per_section": count,
-        "ai_provider": "OpenRouter + local fallback",
-        "sections": {},
-    }
-
-    for title, key in SECTIONS:
-        videos = world if "world" in key else india
-        if key in {"genre_trends", "general_shorts", "general_longform", "genre_fusion"}:
-            videos = india + world
-
-        print(f"[INFO] Generating: {title}")
-        report["sections"][key] = {
-            "title": title,
-            "ideas": _generate_section(key, videos, count),
-        }
-
-    return report
-
-
-def render_report(report: Any, output_path: str | Path | None = None) -> str:
-    """
-    Render report to a readable TXT file and return the text.
-    If output_path is supplied, the text is written there.
-    """
-    if isinstance(report, str):
-        text = report
-    else:
-        lines = [
-            "=" * 60,
-            "YOUTUBE HIGH CTR IDEA GENERATOR",
-            "=" * 60,
-            f"Generated: {report.get('generated_at', '')}",
-            f"Ideas per section: {report.get('ideas_per_section', IDEAS_PER_SECTION)}",
-            "",
+def trend_analysis(trends,videos,region):
+    out=[]
+    for i in range(IDEAS_PER_SECTION):
+        t=trends[i%len(trends)] if trends else {'trend':'current audience curiosity','subgenre':'Mystery','mentions':0,'combined_views':0,'avg_views':0,'category':''}
+        name=t['trend']; g=infer_genre(t)
+        modes=[
+          (f'Why {name} Is Winning YouTube Right Now — And The Story Angle Nobody Is Using',f'{name} is getting attention. The real question is why viewers choose it now and what story angle has not been claimed yet.','visible trend → audience reason → hidden mechanism → creator angle → payoff'),
+          (f'{name}: The Exact Moment A Viewer Decides To Keep Watching',f'Break the trend into its hook, emotional promise and retention mechanism instead of merely describing it.','example → hook → retention mechanism → proof → creator formula'),
+          (f'The {g} Side Of {name} Is Bigger Than The Trend Itself',f'Map the trend into {g} and identify a creator-friendly story structure that can be made original.','trend → genre split → audience emotion → winning structure → opportunity'),
+          (f'Everyone Sees {name}. Few Understand Why It Gets Clicks.',f'Reverse-engineer the topic into title promise, thumbnail promise, opening tension and payoff.','surface trend → click trigger → retention trigger → mistake → winning formula'),
         ]
+        title,premise,structure=modes[i%4]
+        out.append(idea(i+1,title,f'Open with the surprising consequence of {name}, not a definition of it.',premise,g,'Trend Analysis',structure,trend_reason(t,region),f"{name} | {stats(t)}",sources(t,videos),region))
+    return out
 
-        for number, (_, key) in enumerate(SECTIONS, start=1):
-            section = report.get("sections", {}).get(key, {})
-            lines.extend(
-                [
-                    f"SECTION {number}: {section.get('title', key)}",
-                    "-" * 60,
-                ]
-            )
 
-            ideas = section.get("ideas", [])
-            if not ideas:
-                lines.append("No ideas generated.")
-                lines.append("")
-                continue
+def trend_shorts(trends,videos):
+    out=[]
+    for i,(title,premise,structure) in enumerate(SHORT_BLUEPRINTS):
+        t=trends[i%len(trends)] if trends else {'trend':'current trend','subgenre':'Mystery','mentions':0,'combined_views':0,'avg_views':0}
+        name=t['trend']; g=infer_genre(t)
+        title=title.replace('The Trend',name)
+        out.append(idea(i+1,title,f'Show the most surprising consequence connected to {name in title and name or "the trend"} in the first 3 seconds.',premise+f" Use {name} only as the topical entry point; the story must have its own conflict and payoff.",g,'YouTube Shorts',structure,'The trend supplies recognition; the new conflict supplies the reason to stay. This is not a copy of the trend.',f"Based on {name} | {stats(t)}",sources(t,videos)))
+    return out
 
-            for item in ideas:
-                lines.extend(
-                    [
-                        f"{item.get('rank', '')}. {item.get('title', '')}",
-                        f"Format: {item.get('format', '')}",
-                        f"Genre: {item.get('genre', '')}",
-                        f"Why it can work: {item.get('why_it_can_work', '')}",
-                        f"Roman Telugu logline: {item.get('logline_roman_telugu', '')}",
-                        f"Trend reference: {item.get('trend_reference', '')}",
-                        "",
-                    ])
 
-            lines.append("")
+def trend_longform(trends,videos):
+    out=[]
+    for i,(title,premise,structure) in enumerate(LONG_BLUEPRINTS):
+        t=trends[i%len(trends)] if trends else {'trend':'current trend','subgenre':'Mystery','mentions':0,'combined_views':0,'avg_views':0}
+        name=t['trend']; g=infer_genre(t)
+        title=title.replace('The Trend',name)
+        out.append(idea(i+1,title,f'Show the result first, then promise to explain how it happened.',premise+f" Use {name} as the recognizable entry point, but make the episode a complete 8–10 minute story.",g,'YouTube Longform 8–10 min',structure,'It combines current-topic recognition with a real question, conflict and measurable payoff that can sustain 8–10 minutes.',f"Based on {name} | {stats(t)}",sources(t,videos)))
+    return out
 
-        lines.extend(
-            [
-                "=" * 60,
-                "END OF YOUTUBE HIGH CTR IDEA REPORT",
-                "=" * 60,
-            ]
-        )
 
-        text = "\n".join(lines)
+def general_shorts():
+    out=[]
+    for i,(title,premise,structure,genre) in enumerate(GENERAL_SHORTS[:IDEAS_PER_SECTION]):
+        out.append(idea(i+1,title,'Start on the impossible moment. Do not begin with an introduction or explanation.',premise,genre,'YouTube Shorts',structure,'The premise creates a specific question immediately and delays the answer through evidence rather than empty suspense.'))
+    return out
 
+
+def general_longform():
+    out=[]
+    for i,(title,premise,g) in enumerate(GENERAL_LONG[:IDEAS_PER_SECTION]):
+        out.append(idea(i+1,title,'Open on the strongest evidence or consequence, then cut back to before the problem started.',premise,g,'YouTube Longform 8–10 min','cold open → question → rules/evidence → false lead → escalation → final clue → reveal','Each section changes what the viewer thinks the answer is; it is a story, not a generic challenge.'))
+    return out
+
+
+def genre_fusion(trends):
+    out=[]
+    for i,(pair,premise,structure,why) in enumerate(FUSIONS):
+        t=trends[i%len(trends)] if trends else {'trend':'current genre signal'}
+        out.append(idea(i+1,[
+          'The Funniest Person In The Room Notices The One Clue Everyone Missed',
+          'The Digital Clue That Should Have Been Impossible',
+          '10 Minutes. 8 Clues. One Answer Nobody Expects.',
+          'I Made A Joke About It — Then The Prediction Came True',
+          "My Phone Feature Revealed Something It Shouldn't Know",
+          'The Game Gave Me A Clue That Existed In Real Life',
+          'The Worst Detective In The Room Solved The Case',
+          'The App Predicted Something I Hadn’t Done Yet',
+        ][i],f'Use {pair} to create two conflicting emotions: the viewer thinks they understand the scene, then the second genre changes its meaning.',premise+f" Trend wrapper: {t.get('trend','current genre signal')}.",pair,'YouTube Longform 8–10 min',structure,why,f"Genre fusion + trend signal: {t.get('trend','current genre signal')}"))
+    return out
+
+
+def maybe_ai_refine(section_title, ideas):
+    if not USE_OPENROUTER: return ideas
+    key=os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENROUTER_KEY') or ''
+    if not key: return ideas
+    # One tiny refinement call only. Never let provider failure erase local ideas.
+    payload={
+      'model':OPENROUTER_MODEL,
+      'messages':[{'role':'system','content':'You are a senior YouTube creative director. Return JSON only.'},{'role':'user','content':(
+        'Improve these first 3 ideas for very high CTR. No silly/generic concepts. Keep concrete conflict, escalation, payoff and Roman Telugu logline. Do not invent facts. Return {"ideas":[{"rank":1,"title":"...","hook":"...","why_people_will_click":"...","logline_roman_telugu":"..."}]}\nSECTION: '+section_title+'\n'+json.dumps(ideas[:3],ensure_ascii=False)
+      )}],
+      'temperature':0.9,'max_tokens':OPENROUTER_MAX_TOKENS
+    }
+    try:
+      r=requests.post(OPENROUTER_URL,headers={'Authorization':f'Bearer {key}','Content-Type':'application/json'},json=payload,timeout=40)
+      if r.status_code!=200: return ideas
+      content=(r.json().get('choices') or [{}])[0].get('message',{}).get('content','')
+      m=re.search(r'\{.*\}',content,re.S)
+      if not m: return ideas
+      improved=json.loads(m.group(0)).get('ideas',[])
+      byrank={x.get('rank'):x for x in improved if isinstance(x,dict)}
+      for x in ideas:
+        y=byrank.get(x['rank'])
+        if y:
+          for k in ('title','hook','why_people_will_click','logline_roman_telugu'):
+            if clean(y.get(k)): x[k]=clean(y[k])
+    except Exception as e:
+      print(f'[WARN] AI refinement skipped: {e}')
+    return ideas
+
+
+def generate_report(*args,**kwargs):
+    india=kwargs.get('india_trends') or kwargs.get('india_data') or kwargs.get('india')
+    world=kwargs.get('world_trends') or kwargs.get('world_data') or kwargs.get('world')
+    if india is None and args: india=args[0]
+    if world is None and len(args)>1: world=args[1]
+    if india is None: india=kwargs.get('data') or kwargs.get('trend_data') or kwargs.get('videos') or {}
+    if world is None: world={}
+    iv=extract_videos(india,80); wv=extract_videos(world,80)
+    it=extract_trends(india,40); wt=extract_trends(world,40)
+    alltr=[]; seen=set()
+    for t in it+wt:
+        if t['trend'].lower() not in seen:
+            seen.add(t['trend'].lower()); alltr.append(t)
+    if not it: it=alltr[:]
+    if not wt: wt=alltr[:]
+    print(f'[INFO] India trends={len(it)} World trends={len(wt)} Videos={len(iv)+len(wv)}')
+    sections={
+      'india_trends':{'title':'1. India YouTube Trends','ideas':trend_analysis(it,iv,'India')},
+      'world_trends':{'title':'2. World YouTube Trends','ideas':trend_analysis(wt,wv,'World')},
+      'genre_trends':{'title':'3. YouTube Genre Trends','ideas':trend_analysis(alltr,iv+wv,'India + World')},
+      'trend_shorts':{'title':'4. Trend-Based Shorts Ideas','ideas':trend_shorts(alltr,iv+wv)},
+      'trend_longform':{'title':'5. Trend-Based Longform Ideas','ideas':trend_longform(alltr,iv+wv)},
+      'general_shorts':{'title':'6. General India + World Shorts Ideas','ideas':general_shorts()},
+      'general_longform':{'title':'7. General India + World Longform Ideas','ideas':general_longform()},
+      'genre_fusion':{'title':'8. Genre-Fusion High-CTR Ideas','ideas':genre_fusion(alltr)},
+    }
+    for k,s in sections.items(): s['ideas']=maybe_ai_refine(s['title'],s['ideas'])
+    return {'title':'YOUTUBE HIGH CTR IDEA GENERATOR','generated_at':datetime.now(timezone.utc).astimezone().isoformat(),'ideas_per_section':IDEAS_PER_SECTION,'engine':'High-CTR Story Engine + optional OpenRouter refinement','sections':sections}
+
+
+def render_report(report,output_path=None):
+    if isinstance(report,str): text=report
+    else:
+      lines=['='*78,'YOUTUBE HIGH CTR IDEA GENERATOR','='*78,f"Generated: {report.get('generated_at','')}",f"Ideas per section: {report.get('ideas_per_section',8)}",'','QUALITY STANDARD: Concrete premise + curiosity gap + conflict + escalation + payoff.','']
+      for key,title in SECTIONS:
+        sec=report['sections'].get(key,{})
+        lines += ['','='*78,sec.get('title',title),'='*78,'']
+        for x in sec.get('ideas',[]):
+          lines += [f"#{x['rank']} HIGH CTR IDEA",'-'*78,f"High CTR Idea: {x['high_ctr_idea']}",'',f"Hook: {x['hook']}",'',f"Format: {x['format']}",f"Genre: {x['genre']}",f"Region: {x.get('region','India + World')}",f"CTR Score: {x.get('ctr_score','')}/10",'', 'WHY PEOPLE WILL CLICK:',x['why_people_will_click'],'','STORY PREMISE:',x['story_premise'],'','FIRST 15 SECONDS:',x['first_15_seconds'],'','ESCALATION:',x['escalation'],'','PAYOFF:',x['payoff'],'','THUMBNAIL CONCEPT:',x['thumbnail_concept'],'','ROMAN TELUGU LOGLINE:',x['logline_roman_telugu'],'','TREND BASIS:',x['trend_basis'],'']
+          if x.get('source_videos'):
+            lines += ['SOURCE VIDEOS:']+[f"- {v['title']}" + (f" | {v['url']}" if v.get('url') else '') for v in x['source_videos']]+['']
+      lines += ['','='*78,'END OF REPORT','='*78]
+      text='\n'.join(lines)
     if output_path:
-        path = Path(output_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-
+      p=Path(output_path); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(text,encoding='utf-8')
     return text
 
 
-def save_json(report: dict[str, Any], path: str | Path | None = None) -> Path:
-    path = Path(path or OUTPUT_DIR / "youtube_high_ctr_ideas.json")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return path
+def save_json(report,path=None):
+    p=Path(path or OUTPUT_DIR/'youtube_high_ctr_ideas.json'); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8'); return p
 
 
-def save_txt(report: dict[str, Any], path: str | Path | None = None) -> Path:
-    path = Path(path or OUTPUT_DIR / "youtube_high_ctr_report.txt")
-    render_report(report, path)
-    return path
+def save_txt(report,path=None):
+    p=Path(path or OUTPUT_DIR/'youtube_high_ctr_report.txt'); render_report(report,p); return p
 
 
-if __name__ == "__main__":
-    # Standalone test. It does not need YouTube API access.
-    demo = generate_report(
-        india_videos=[
-            {"title": "Sample India Trend Video", "videoId": "demo1"},
-            {"title": "Popular Telugu Mystery Video", "videoId": "demo2"},
-        ],
-        world_videos=[
-            {"title": "Global Challenge Trend", "videoId": "demo3"},
-            {"title": "Global Mystery Trend", "videoId": "demo4"},
-        ],
-        ideas_per_section=IDEAS_PER_SECTION,
-    )
-
-    txt = save_txt(demo)
-    js = save_json(demo)
-
-    print(f"[OK] TXT:  {txt}")
-    print(f"[OK] JSON: {js}")
+if __name__=='__main__':
+    demo={'india':{'longform':[{'trend':'Trailer','mentions':15,'combined_views':35908591,'avg_views':2393906,'category':'Entertainment','subgenre':'Movies & Entertainment'},{'trend':'Crime Investigation','mentions':9,'combined_views':18000000,'avg_views':2000000,'category':'Entertainment','subgenre':'Crime Thriller'}]},'world':{'longform':[{'trend':'AI Experiment','mentions':12,'combined_views':30000000,'avg_views':2500000,'category':'Technology','subgenre':'Technology'}]}}
+    r=generate_report(india_trends=demo['india'],world_trends=demo['world'])
+    print(save_txt(r)); print(save_json(r)); print('[OK] 8 sections x 8 ideas generated')

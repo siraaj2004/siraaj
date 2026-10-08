@@ -20,14 +20,15 @@ OPENROUTER_MAX_TOKENS = max(250, min(int(os.getenv('OPENROUTER_MAX_TOKENS', '700
 USE_OPENROUTER = os.getenv('USE_OPENROUTER', 'false').lower() in {'1','true','yes','on'}
 
 SECTIONS = [
-    ('india_trends', '1. India YouTube Trends'),
-    ('world_trends', '2. World YouTube Trends'),
-    ('genre_trends', '3. YouTube Genre Trends'),
-    ('trend_shorts', '4. Trend-Based Shorts Ideas'),
-    ('trend_longform', '5. Trend-Based Longform Ideas'),
-    ('general_shorts', '6. General India + World Shorts Ideas'),
-    ('general_longform', '7. General India + World Longform Ideas'),
-    ('genre_fusion', '8. Genre-Fusion High-CTR Ideas'),
+    ('best_ctr', '1. BEST IDEA BASED ON CTR'),
+    ('india_trends', '2. INDIA YOUTUBE TRENDS'),
+    ('world_trends', '3. WORLD YOUTUBE TRENDS'),
+    ('genre_trends', '4. YOUTUBE GENRE TRENDS'),
+    ('trend_shorts', '5. TREND-BASED SHORTS'),
+    ('trend_longform', '6. TREND-BASED LONGFORM'),
+    ('general_shorts', '7. GENERAL SHORTS'),
+    ('general_longform', '8. GENERAL LONGFORM'),
+    ('genre_fusion', '9. GENRE FUSION'),
 ]
 
 GENRE_WORDS = {
@@ -166,6 +167,28 @@ def trend_reason(t: dict[str,Any], region: str) -> str:
     return f"{region} trend: {name}. {base} The opportunity is to build a story around the trend rather than simply report it. Signal: {stats(t)}."
 
 
+
+def calculate_ctr_score(title, hook, premise, structure, genre):
+    """Deterministic CTR score based on title curiosity, specificity, conflict and retention structure."""
+    text=' '.join([title, hook, premise, genre]).lower()
+    score=7.0
+    curiosity=['why','how','what','who','nobody','secret','impossible','missing','wrong','before','last','never','inside','predict','recorded','stranger','message']
+    stakes=['prove','one chance','8 minutes','countdown','rule','fail','danger','trapped','deadline','lies','lying']
+    evidence=['clue','evidence','timestamp','photo','video','recording','file','phone','camera','proof','detail']
+    reveals=['reveal','twist','answer','truth','final','payoff','contradiction']
+    for w in curiosity:
+        if w in text: score += 0.20
+    for w in stakes:
+        if w in text: score += 0.22
+    for w in evidence:
+        if w in text: score += 0.12
+    for w in reveals:
+        if w in text: score += 0.10
+    if any(x in text for x in ['→','false lead','escalation']): score += 0.30
+    if 35 <= len(title) <= 85: score += 0.35
+    if any(g.lower() in genre.lower() for g in ['thriller','crime','mystery']): score += 0.25
+    return round(min(score, 9.9), 1)
+
 def idea(rank,title,hook,premise,genre,fmt,structure,why,trend_basis='',src=None,region='India + World'):
     steps=[x.strip() for x in structure.split('→') if x.strip()]
     payoff=steps[-1] if steps else 'the final reveal'
@@ -179,7 +202,7 @@ def idea(rank,title,hook,premise,genre,fmt,structure,why,trend_basis='',src=None
           f"Start lo {premise.lower()} ani audience ki anipistundi. Kani madhyalo oka strong clue dorukutundi; dani valla {genre.lower()} angle lo asalu problem vere laga kanipistundi. Prathi step tho tension perigela clues ivvali, audience kuda answer guess cheyyali. Last lo {payoff.lower()} reveal ayyaka opening lo unna small detail ki kotha meaning vastundi — ade satisfying payoff."
       ),
       'trend_basis':trend_basis or 'Original concept','source_videos':src or [],
-      'ctr_score':9.0 if any(w in title.lower() for w in ['nobody','wrong','impossible','one','last','before','why','secret','missing']) else 8.7,
+      'ctr_score':calculate_ctr_score(title, hook, premise, structure, genre),
     }
 
 
@@ -336,6 +359,57 @@ def maybe_ai_refine(section_title, ideas):
     return ideas
 
 
+
+def best_ctr_section(all_sections):
+    """Pick the strongest actual generated idea, not a hard-coded winner."""
+    candidates=[]
+    for key, sec in all_sections.items():
+        if key == 'best_ctr':
+            continue
+        for item in sec.get('ideas', []):
+            copy=dict(item)
+            copy['source_section']=sec.get('title', key)
+            candidates.append(copy)
+    if not candidates:
+        return []
+    candidates.sort(key=lambda x: (float(x.get('ctr_score', 0)), len(x.get('source_videos', []))), reverse=True)
+    winner=dict(candidates[0])
+    winner['rank']=1
+    winner['why_people_will_click'] = (
+        f"BEST OVERALL CTR SCORE: {winner.get('ctr_score', 'N/A')}/10. "
+        f"This idea combines a clear curiosity gap, concrete conflict, evidence, escalation and a delayed payoff. "
+        f"It came from {winner.get('source_section', 'the generated idea pool')}."
+    )
+    winner['trend_basis'] = winner.get('trend_basis', '') + f" | Selected as the highest-scoring generated idea from all sections."
+    return [winner]
+
+
+def genre_analysis(trends, videos):
+    """Create genre/subgenre analysis from detected trend data without inventing current numbers."""
+    groups={}
+    for t in trends:
+        g=infer_genre(t)
+        groups.setdefault(g, []).append(t)
+    ranked=sorted(groups.items(), key=lambda kv: sum(float(x.get('combined_views') or 0) for x in kv[1]), reverse=True)
+    out=[]
+    for i,(genre, items) in enumerate(ranked[:IDEAS_PER_SECTION]):
+        top=max(items, key=lambda x: float(x.get('combined_views') or x.get('avg_views') or x.get('mentions') or 0))
+        subgenres=sorted({str(x.get('subgenre')).strip() for x in items if x.get('subgenre')})
+        subtext=', '.join(subgenres[:4]) if subgenres else genre
+        why={
+          'Thriller':'uncertainty and delayed answers create strong retention.',
+          'Crime':'evidence, suspects and contradictions make viewers participate as detectives.',
+          'Mystery':'viewers can form a theory before the reveal, creating active watching.',
+          'Comedy':'a clear premise plus an unexpected consequence gives immediate accessibility.',
+          'Horror':'anticipation and uncertainty make the viewer wait for the threat to become clear.',
+          'Technology':'familiar tools become compelling when they produce an unexpected result.',
+          'Gaming':'missions, rules, consequences and mysteries give gameplay a narrative reason to continue.',
+        }.get(genre,'the genre gives a clear emotional promise that can be turned into a specific story.')
+        title=f'{genre} Is Showing A Strong YouTube Signal — Here Is The Creator Opportunity'
+        premise=f'Detected genre: {genre}. Detected subgenre/category signals: {subtext}. Strongest detected topic: {top.get("trend","unknown trend")}. {why}'
+        out.append(idea(i+1,title,f'Open with the strongest evidence that {genre} is getting attention, then show the story format creators can build from it.',premise,genre,'Genre Trend Analysis','signal → genre split → audience emotion → winning format → creator opportunity',f'{why} The creator opportunity is to turn the genre promise into an original conflict instead of copying the detected topic.',f'Genre: {genre} | Subgenres: {subtext} | {stats(top)}',sources(top,videos),'India + World'))
+    return out
+
 def generate_report(*args,**kwargs):
     india=kwargs.get('india_trends') or kwargs.get('india_data') or kwargs.get('india')
     world=kwargs.get('world_trends') or kwargs.get('world_data') or kwargs.get('world')
@@ -343,6 +417,7 @@ def generate_report(*args,**kwargs):
     if world is None and len(args)>1: world=args[1]
     if india is None: india=kwargs.get('data') or kwargs.get('trend_data') or kwargs.get('videos') or {}
     if world is None: world={}
+
     iv=extract_videos(india,80); wv=extract_videos(world,80)
     it=extract_trends(india,40); wt=extract_trends(world,40)
     alltr=[]; seen=set()
@@ -351,19 +426,25 @@ def generate_report(*args,**kwargs):
             seen.add(t['trend'].lower()); alltr.append(t)
     if not it: it=alltr[:]
     if not wt: wt=alltr[:]
+    if not alltr: alltr=[{'trend':'current audience curiosity','subgenre':'Mystery','mentions':0,'combined_views':0,'avg_views':0,'category':'Entertainment'}]
+
     print(f'[INFO] India trends={len(it)} World trends={len(wt)} Videos={len(iv)+len(wv)}')
+
     sections={
-      'india_trends':{'title':'1. India YouTube Trends','ideas':trend_analysis(it,iv,'India')},
-      'world_trends':{'title':'2. World YouTube Trends','ideas':trend_analysis(wt,wv,'World')},
-      'genre_trends':{'title':'3. YouTube Genre Trends','ideas':trend_analysis(alltr,iv+wv,'India + World')},
-      'trend_shorts':{'title':'4. Trend-Based Shorts Ideas','ideas':trend_shorts(alltr,iv+wv)},
-      'trend_longform':{'title':'5. Trend-Based Longform Ideas','ideas':trend_longform(alltr,iv+wv)},
-      'general_shorts':{'title':'6. General India + World Shorts Ideas','ideas':general_shorts()},
-      'general_longform':{'title':'7. General India + World Longform Ideas','ideas':general_longform()},
-      'genre_fusion':{'title':'8. Genre-Fusion High-CTR Ideas','ideas':genre_fusion(alltr)},
+      'best_ctr':{'title':'1. BEST IDEA BASED ON CTR','ideas':[]},
+      'india_trends':{'title':'2. INDIA YOUTUBE TRENDS','ideas':trend_analysis(it,iv,'India')},
+      'world_trends':{'title':'3. WORLD YOUTUBE TRENDS','ideas':trend_analysis(wt,wv,'World')},
+      'genre_trends':{'title':'4. YOUTUBE GENRE TRENDS','ideas':genre_analysis(alltr,iv+wv)},
+      'trend_shorts':{'title':'5. TREND-BASED SHORTS','ideas':trend_shorts(alltr,iv+wv)},
+      'trend_longform':{'title':'6. TREND-BASED LONGFORM','ideas':trend_longform(alltr,iv+wv)},
+      'general_shorts':{'title':'7. GENERAL SHORTS','ideas':general_shorts()},
+      'general_longform':{'title':'8. GENERAL LONGFORM','ideas':general_longform()},
+      'genre_fusion':{'title':'9. GENRE FUSION','ideas':genre_fusion(alltr)},
     }
-    for k,s in sections.items(): s['ideas']=maybe_ai_refine(s['title'],s['ideas'])
-    return {'title':'YOUTUBE HIGH CTR IDEA GENERATOR','generated_at':datetime.now(timezone.utc).astimezone().isoformat(),'ideas_per_section':IDEAS_PER_SECTION,'engine':'High-CTR Story Engine + optional OpenRouter refinement','sections':sections}
+    for k,s in sections.items():
+        if k != 'best_ctr': s['ideas']=maybe_ai_refine(s['title'],s['ideas'])
+    sections['best_ctr']['ideas']=best_ctr_section(sections)
+    return {'title':'YOUTUBE HIGH CTR IDEA GENERATOR','generated_at':datetime.now(timezone.utc).astimezone().isoformat(),'ideas_per_section':IDEAS_PER_SECTION,'engine':'Deterministic High-CTR Story Engine + optional OpenRouter refinement','sections':sections}
 
 
 def render_report(report,output_path=None):
@@ -395,4 +476,4 @@ def save_txt(report,path=None):
 if __name__=='__main__':
     demo={'india':{'longform':[{'trend':'Trailer','mentions':15,'combined_views':35908591,'avg_views':2393906,'category':'Entertainment','subgenre':'Movies & Entertainment'},{'trend':'Crime Investigation','mentions':9,'combined_views':18000000,'avg_views':2000000,'category':'Entertainment','subgenre':'Crime Thriller'}]},'world':{'longform':[{'trend':'AI Experiment','mentions':12,'combined_views':30000000,'avg_views':2500000,'category':'Technology','subgenre':'Technology'}]}}
     r=generate_report(india_trends=demo['india'],world_trends=demo['world'])
-    print(save_txt(r)); print(save_json(r)); print('[OK] 8 sections x 8 ideas generated')
+    print(save_txt(r)); print(save_json(r)); print('[OK] 9 sections generated successfully')

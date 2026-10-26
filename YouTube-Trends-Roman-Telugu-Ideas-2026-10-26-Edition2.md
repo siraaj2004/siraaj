@@ -1,13 +1,12 @@
-# YouTube Trends Report — India & World — Roman Telugu Ideas (Edition 2, revised 26 Oct 2026)
+# YouTube Trends Report — India & World — Roman Telugu Ideas (Edition 2, Malayalam upgrade, 26 Oct 2026)
 
-Single PDF: `youtube-trends-roman-telugu-ideas-2.pdf` (13 pages, A4, 235,661 bytes, revised and verified 2026-10-26 — was 12 pages / 212,593 bytes).
+Single PDF: `youtube-trends-roman-telugu-ideas-2.pdf` (13 pages, A4, 248,568 bytes, Malayalam upgrade verified 2026-10-26).
 
-## What changed in the revision (shaik's fix, 23:19 IST)
+## What changed in the Malayalam upgrade
 
-- **High-CTR ideas are now on top:** page 2 is "Top high-CTR ideas - start here", ranked by specific time/place/object, real-life stakes, 3–4-word thumbnail readability, and a twist the clues earn.
-- **No silly / filler ideas:** removed Secret Room, Old Cinema Hall, Deepavali Current Cut, Hostel Song (long-form), plus the "Meere Judge" comment-game Short and the "Next Long-Form Teaser" filler Short. Verified absent from the revised PDF by text extraction.
-- **Replaced with stronger realistic Malayalam-style stories:** CCTV Technician, Bank Locker Photo, Night Pharmacy, Old Age Home Visitor.
-- **All ideas reordered by CTR rank, not genre.** Trends, genre scoreboard and formula now come after the ideas.
+- All 15 long-form ideas + 20 Shorts rewritten Malayalam-style: a named ordinary person, one impossible detail, a personal stake, planted clues, and a logical twist.
+- Top CTR idea + logline on page 1, full ranked top list with loglines on page 2.
+- Titles sharpened for CTR, e.g. L1 "Night 1:13 AM Ki Lift Aagipoyindi - Lopala Ammayi 'Open Cheyyakandi' Annadi Enduku?", L2 "UPI Lo Vachina 1 Rupee: 10 Minutes Lo Life Savings Antha Empty Ayindi Ela?"
 
 ## Verdict: which genre is booming?
 
@@ -17,14 +16,12 @@ The winning Telugu play: Shorts create the curiosity, long-form pays it off.
 
 ## Top high-CTR ideas + loglines (page 1–2, shoot first)
 
-1. **L1 Lift 1:13 AM** — Logline: Ratri 1:13 ki oka apartment lift 7th floor lo aagipoyindi. Lopala nundi oka chinna voice vastundi — "Door open cheyyakandi." Lopala unna vyakti victim kaadu, bayata unna vyakti nundi tappinchukotanike lift lone daakkunnadu.
-2. **L2 UPI 1 Rupee** — Logline: Oka shopkeeper account loki 1 rupee vachindi. 10 minutes tarvata motham balance zero. Scam modalettindi bayata hacker kaadu — shop lone pani chese part-time boy.
-3. **L3 RTC Bus 14 / 13** — Logline: Conductor count: 14 tickets, destination ki vachindi 13 members matrame. Missing passenger asalu bus ekkina vyaktiye kaadu — identity marchukunna witness.
-4. **L4 Daily Voice Note** — Logline: Missing ayina abbayi phone nundi rojuki oka voice note vastundi, anni okate mata: "Nenu intiki vastunna." Pampistundi scammer kaadu — nijam cheppaleni best friend.
-5. **L5 Wedding Photo Stranger** — Logline: Wedding album lo prathi group photo lo oka stranger unnadu. Evaru athadini pilavaledu, evariki gurthu ledu. Athadu thief kaadu — 20 years ga family ki teliyani sambandham.
-6. **S1–S3 Top Shorts** — Logline: Lift lo voice, account loki 1 rupee, bus lo 14 ki 13 — mude Shorts okko prashna tho aagipotayi. Jawab matram long-form lone dorukutundi.
-
-Note: this markdown accompanies the 240,648-byte logline PDF (13 pages). A further Malayalam-style upgrade to all ideas + loglines is still building separately and will replace this version when verified.
+1. **L1 Lift 1:13 AM** — Logline: Watchman Ravi mundu lift 1:13 ki aagipoyindi; lopala ammayi annadi, "Door open cheyyakandi, athanu bayate unnadu." Kani CCTV corridor khali. Door testhe aame danger lo, testakapothe Ravi ye suspect.
+2. **L2 UPI 1 Rupee** — Logline: Koothuri pelli kosam dachina life savings — kirana shop Satyam account loki 1 rupee vachina 10 minutes ki motham zero. Bank, police iddaru athanne tappu pattaru. Migilina clue okate: 1 rupee pampina peru.
+3. **L3 RTC Bus 14 / 13** — Logline: Conductor Prasad lekka: 14 tickets, destination ki vachindi 13 mandi. Kani okka seat kuda khali ledu. Evaru madhyalo digipoyaro telidu — ee okka tappu lekka oka witness ni bayata pedutundi.
+4. **L4 Daily Voice Note** — Logline: Missing Kiran phone nundi prathi roju 6 ki amma ki voice note: "Nenu intiki vastunna." Voice athande, kani background lo vache train sound athani route ki sambandhame ledu.
+5. **L5 Wedding Photo Stranger** — Logline: Wedding album lo prathi photo lo oka stranger. Evaru pilavaledu, evariki gurthu ledu. Kani okka photo lo bride amma athani cheyyi pattukuni edustundi — aa photo venaka 20-year secret undi.
+6. **S1–S3 Top Shorts** — Logline: Lift lo oka voice, account loki 1 rupee, bus lo 14 ki 13 — mude Shorts okko prashna tho modalavutayi, prathi prashna venaka oka long-form case undi. Jawab matram long-form lone dorukutundi.
 
 ## India trends — long-form vs Shorts
 
@@ -38,54 +35,26 @@ Note: this markdown accompanies the 240,648-byte logline PDF (13 pages). A furth
 
 ## Malayalam-thriller formula + high-CTR system
 
-Ordinary person, realistic investigation, 3 clues in the first 3 minutes, one moral dilemma, a logical twist (not a shock twist), quiet ending. Titles = curiosity gap, thumbnails = 3–4 words max + one clue object, hook in the first 5 seconds, every Short ends with one unanswered question.
+Ordinary person + one impossible detail + a personal stake + a question left open — a logline with no question earns no click. Titles = curiosity gap, thumbnails = 3–4 words max + one clue object, hook in the first 5 seconds, every Short ends with one unanswered question.
 
-## 15 long-form ideas (Roman Telugu, in CTR rank order)
+## 15 long-form ideas (Roman Telugu, in CTR rank order, Malayalam upgrade)
 
-1. Night 1:13 AM Ki Aa Lift Aagipoyindi - Lopala Evaru Unnaru?
-2. UPI Lo Vachina 1 Rupee: Aa Tarvata Account Empty Ayindi Ela?
-3. Oka RTC Bus, 14 Passengers - Okaru Bus Digaledu, Okaru Ekaledu
-4. Voice Note: "Nenu Intiki Vastunna" - Kani Athanu 2 Days Nundi Missing
-5. Pelli Mandapam Lo Oka Guest: Andaru Photo Lo Unnadu, Evariki Gurthu Ledu
-6. Check Post Daggara Aagina Lorry: Driver Okkade, Cabin Lo Rendu Tea Glasses
-7. Govt Hospital Night Shift: Oka Patient File Prathi Night Marchipotundi
-8. CCTV Repair Ki Vellina Technician: Deleted Footage Lo Thanane Chusadu - Date 3 Days Mundu
-9. Tandri Diary Last Page: "Nannu Kshaminchandi, Nenu Cheppina Katha Abaddham"
-10. Oka Postman, 200 Letters - Okka Letter Kuda Deliver Cheyyaledu, Enduku?
-11. Bank Locker Open Chesinappudu: Lopala Dabbu Ledu - Oka Photo, Venaka Repati Date
-12. Oka Advocate, Oka Case - Gelichina Tarvata Client Kanipinchaledu
-13. Night Pharmacy: Prathi Roju 11:40 PM Ki Oke Medicine - Kani Adi 5 Years Nundi Ban
-14. Old Age Home: Prathi Roju 4 PM Ki Oka Visitor Vastadu - Register Lo Matram Peru Ledu
-15. School Lo Oka Empty Bench: Aa Student Eppudu Raledu, Attendance Matram Undi
+Full logline, clues and twist for each are in the PDF. Top titles include:
+1. Night 1:13 AM Ki Lift Aagipoyindi - Lopala Ammayi "Open Cheyyakandi" Annadi Enduku?
+2. UPI Lo Vachina 1 Rupee: 10 Minutes Lo Life Savings Antha Empty Ayindi Ela?
+3. RTC Bus Lo 14 Tickets, 13 Passengers - Madhyalo Digipoyina Aa Oka Vyakti Evaru?
+4. Missing Abbayi Phone Nundi Daily Voice Note - "Nenu Vastunna" - Athanu Ekada?
+5. Pelli Album Lo Prathi Photo Lo Oka Stranger - Evaru Pilavakunda Enduku Vachadu?
 
-Full hook, story, twist and thumbnail text for each are in the PDF.
+Plus the upgraded versions of the remaining long-form ideas (CCTV Technician, Bank Locker Photo, Night Pharmacy, Old Age Home Visitor, and others) — see the PDF pages 3–6 for the full ranked list.
 
 ## 20 Shorts ideas (Roman Telugu, in CTR rank order)
 
-1. Lift 1:13 AM - Part 1
-2. 1 Rupee Scam Warning
-3. 14 Tickets, 13 Members
-4. Daily Voice Note
-5. Wedding Photo Stranger
-6. Rendu Tea Glasses
-7. Deleted Footage Lo Athane?
-8. Locker Photo - Repati Date
-9. File Marchipotundi
-10. Diary Last Page
-11. 200 Letters
-12. Ban Chesina Medicine
-13. Advocate Case Gelichadu
-14. 4 PM Visitor
-15. Empty Bench
-16. Bus Dhaba Stop - Part 2
-17. CCTV Lo Rendu Shadows
-18. Hospital Night Shift
-19. Lorry Driver 40-Minute Gap
-20. Old Age Home Chair
+Every Short lands its impossible detail in the first two seconds and ends on one unanswered question — see PDF pages 7–8 for the full list, including the lift voice, 1-rupee scam, bus 14/13, daily voice note, wedding stranger, deleted footage, locker photo, and old age home chair Shorts.
 
 ## 30-day plan
 
-Updated to the new L/S numbering in the PDF: Halloween week first, then Lift series, then UPI scam, then Tandri Diary emotional finish. Sunday long-form, Mon–Sat one Short a day.
+Sunday long-form, Mon–Sat one Short a day, updated to the new L/S numbering in the PDF.
 
 ## Note
 

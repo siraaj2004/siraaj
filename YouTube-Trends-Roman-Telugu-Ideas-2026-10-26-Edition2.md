@@ -15,14 +15,16 @@ Single PDF: `youtube-trends-roman-telugu-ideas-2.pdf` (13 pages, A4, 235,661 byt
 Horror-Mystery is No. 2 right now for Halloween week (31 Oct).
 The winning Telugu play: Shorts create the curiosity, long-form pays it off.
 
-## Top high-CTR ideas (page 2, shoot first)
+## Top high-CTR ideas + loglines (page 1–2, shoot first)
 
-1. L1 Lift 1:13 AM — specific time + trapped person + "do not open"
-2. L2 UPI 1 Rupee — money fear every phone user feels
-3. L3 RTC Bus 14 / 13 — a count that does not add up
-4. L4 Daily Voice Note — a missing person who still sends one message a day
-5. L5 Wedding Photo Stranger — a stranger in every photo, invited by nobody
-6. S1–S3 Top Shorts — Lift, 1-rupee and bus hooks as 60-second series openers
+1. **L1 Lift 1:13 AM** — Logline: Ratri 1:13 ki oka apartment lift 7th floor lo aagipoyindi. Lopala nundi oka chinna voice vastundi — "Door open cheyyakandi." Lopala unna vyakti victim kaadu, bayata unna vyakti nundi tappinchukotanike lift lone daakkunnadu.
+2. **L2 UPI 1 Rupee** — Logline: Oka shopkeeper account loki 1 rupee vachindi. 10 minutes tarvata motham balance zero. Scam modalettindi bayata hacker kaadu — shop lone pani chese part-time boy.
+3. **L3 RTC Bus 14 / 13** — Logline: Conductor count: 14 tickets, destination ki vachindi 13 members matrame. Missing passenger asalu bus ekkina vyaktiye kaadu — identity marchukunna witness.
+4. **L4 Daily Voice Note** — Logline: Missing ayina abbayi phone nundi rojuki oka voice note vastundi, anni okate mata: "Nenu intiki vastunna." Pampistundi scammer kaadu — nijam cheppaleni best friend.
+5. **L5 Wedding Photo Stranger** — Logline: Wedding album lo prathi group photo lo oka stranger unnadu. Evaru athadini pilavaledu, evariki gurthu ledu. Athadu thief kaadu — 20 years ga family ki teliyani sambandham.
+6. **S1–S3 Top Shorts** — Logline: Lift lo voice, account loki 1 rupee, bus lo 14 ki 13 — mude Shorts okko prashna tho aagipotayi. Jawab matram long-form lone dorukutundi.
+
+Note: this markdown accompanies the 240,648-byte logline PDF (13 pages). A further Malayalam-style upgrade to all ideas + loglines is still building separately and will replace this version when verified.
 
 ## India trends — long-form vs Shorts
 
